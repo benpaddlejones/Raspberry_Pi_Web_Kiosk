@@ -1,0 +1,12 @@
+cage
+chromium
+dbus-user-session
+libgl1-mesa-dri
+fonts-liberation
+fonts-noto-color-emoji
+pipewire-audio
+ca-certificates
+python3
+network-manager
+systemd-timesyncd
+unattended-upgrades

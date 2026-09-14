@@ -1,0 +1,33 @@
+{
+  "version": "0.1.0-alpha.1",
+  "name": "Web Kiosk Preview",
+  "description": "Raspberry Pi OS web kiosk with boot-partition URL configuration",
+  "prerelease": true,
+  "draft": false,
+  "release_notes": {
+    "features": [
+      "Automatic login to an unprivileged Chromium kiosk session",
+      "Website configured in kiosk-url.txt on the Windows/macOS-readable boot partition",
+      "Automatic browser restart after exit",
+      "Daily updates from the official stable OS and security repositories"
+    ],
+    "compatibility": [
+      "Targets Raspberry Pi 4, Pi 400, Pi 5 and Pi 500 (64-bit)",
+      "HDMI display, 2 GB RAM minimum recommended, 16 GB or larger boot media"
+    ],
+    "known_issues": [
+      "Physical Raspberry Pi boot, HDMI and browser validation is still required",
+      "Ethernet is the default network; configure Wi-Fi using Raspberry Pi Imager",
+      "Reboot during maintenance to apply kernel updates and restart the updated browser"
+    ]
+  },
+  "build": {
+    "base_os": "Raspberry Pi OS Lite (64-bit), Debian Trixie",
+    "build_system": "pi-gen",
+    "pi_gen_revision": "86919dae864359499d8148a49910a558d49a00f1"
+  },
+  "metadata": {
+    "repository": "benpaddlejones/Raspberry_Pi_Web_Kiosk",
+    "documentation": "https://github.com/benpaddlejones/Raspberry_Pi_Web_Kiosk#readme"
+  }
+}

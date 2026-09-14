@@ -1,0 +1,138 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (leave blank to use release-config.json)
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read release configuration
+        id: config
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version }}
+        run: python3 scripts/release.py metadata --version "$VERSION_OVERRIDE" >> "$GITHUB_OUTPUT"
+
+      - name: Check release version is unused
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.config.outputs.tag }}
+        run: |
+          tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name')
+          if grep -Fxq -- "$RELEASE_TAG" <<< "$tags"; then
+            printf 'Release %s already exists. Choose a new version.\n' "$RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Install build dependencies
+        run: |
+          sudo -n apt-get update
+          sudo -n apt-get install --yes \
+            coreutils quilt parted qemu-user-static debootstrap zerofree zip \
+            dosfstools e2fsprogs libarchive-tools libcap2-bin rsync xz-utils \
+            file git curl bc gpg pigz xxd arch-test bmap-tools kmod shellcheck
+
+      - name: Install workflow validator
+        run: |
+          GOBIN="$RUNNER_TEMP/web-kiosk-tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          echo "$RUNNER_TEMP/web-kiosk-tools" >> "$GITHUB_PATH"
+
+      - name: Validate source
+        run: bash scripts/check.sh
+
+      - name: Check available disk space
+        run: |
+          df -h .
+          available_kb=$(df --output=avail . | tail -n 1)
+          if (( available_kb < 20 * 1024 * 1024 )); then
+            printf '%s\n' 'At least 20 GiB of free disk space is required.' >&2
+            exit 1
+          fi
+
+      - name: Build Raspberry Pi image
+        env:
+          VERSION: ${{ steps.config.outputs.version }}
+        run: |
+          mkdir -p deploy
+          sudo -n bash scripts/build-image.sh --version "$VERSION" 2>&1 | tee deploy/build.log
+
+      - name: Validate built image
+        run: |
+          shopt -s nullglob
+          images=(deploy/*web-kiosk*.img)
+          if (( ${#images[@]} != 1 )); then
+            printf '%s\n' 'Expected exactly one kiosk image.' >&2
+            exit 1
+          fi
+          sudo -n bash scripts/validate-image.sh "${images[0]}" 2>&1 | tee deploy/validation.log
+
+      - name: Prepare release assets
+        env:
+          VERSION: ${{ steps.config.outputs.version }}
+        run: |
+          sudo -n chown -R "$(id -u):$(id -g)" deploy
+          shopt -s nullglob
+          images=(deploy/*web-kiosk*.img)
+          archive="deploy/RaspberryPi_Web_Kiosk_v${VERSION}.img.gz"
+          pigz -6 -c "${images[0]}" > "$archive"
+          bash scripts/generate-checksums.sh "$VERSION" deploy
+
+      - name: Generate release notes
+        env:
+          VERSION: ${{ steps.config.outputs.version }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          python3 scripts/release.py notes --version "$VERSION" \
+            --commit "$SOURCE_COMMIT" > deploy/release-notes.md
+
+      - name: Upload build logs as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-kiosk-build-logs-${{ github.run_id }}
+          path: |
+            deploy/*.log
+            deploy/*manifest*.txt
+            deploy/release-notes.md
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.config.outputs.tag }}
+          name: v${{ steps.config.outputs.version }} - ${{ steps.config.outputs.name }}
+          body_path: deploy/release-notes.md
+          target_commitish: ${{ github.sha }}
+          files: |
+            deploy/RaspberryPi_Web_Kiosk_v${{ steps.config.outputs.version }}.img.gz
+            deploy/RaspberryPi_Web_Kiosk_v${{ steps.config.outputs.version }}.sha256
+            deploy/VERIFY_DOWNLOAD_v${{ steps.config.outputs.version }}.txt
+            deploy/build-manifest.txt
+            deploy/validation.log
+          fail_on_unmatched_files: true
+          draft: ${{ steps.config.outputs.draft == 'true' }}
+          prerelease: ${{ steps.config.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.config.outputs.prerelease == 'false' && steps.config.outputs.draft == 'false' && 'true' || 'false' }}
