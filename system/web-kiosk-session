@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euo pipefail
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=cage
+
+exec /usr/bin/systemd-cat --identifier=web-kiosk \
+    /usr/bin/dbus-run-session -- /usr/bin/cage -s -- \
+    /usr/bin/python3 /usr/local/lib/raspberry-pi-web-kiosk/kiosk.py
