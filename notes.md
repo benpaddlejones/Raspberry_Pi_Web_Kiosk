@@ -1,0 +1,1 @@
+nmcli -f 802-11-wireless.ssid,802-11-wireless.cloned-mac-address,802-1x.eap,802-1x.phase2-auth,802-1x.anonymous-identity,802-1x.domain-suffix-match,802-1x.ca-cert,802-1x.system-ca-certs connection show detnsw-a
