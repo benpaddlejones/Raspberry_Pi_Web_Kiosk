@@ -7,11 +7,15 @@ import shutil
 import socket
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
 
 DEFAULT_CONFIG = Path("/boot/firmware/kiosk-url.txt")
+PORTAL_PROBE = "http://connectivitycheck.gstatic.com/generate_204"
+PORTAL_WAIT_SECONDS = 180
 
 
 class ConfigError(ValueError):
@@ -75,6 +79,33 @@ def wait_for_network(url: str) -> None:
             time.sleep(5)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *arguments, **keywords):
+        return None
+
+
+def behind_login_page() -> bool:
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(PORTAL_PROBE, timeout=10) as response:
+            return response.status != 204
+    except urllib.error.HTTPError as error:
+        return 300 <= error.code < 400
+    except OSError:
+        # Probe unreachable (e.g. intranet-only network): don't delay the kiosk.
+        return False
+
+
+def wait_for_login_page(limit: float = PORTAL_WAIT_SECONDS) -> None:
+    deadline = time.monotonic() + limit
+    while behind_login_page():
+        if time.monotonic() >= deadline:
+            print("Network login page still required; opening the browser.", file=sys.stderr, flush=True)
+            return
+        print("Network login page detected; waiting for sign-in to clear.", file=sys.stderr, flush=True)
+        time.sleep(5)
+
+
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -95,6 +126,7 @@ def main(arguments: list[str] | None = None) -> int:
             raise ConfigError("Chromium is not installed.")
 
         wait_for_network(url)
+        wait_for_login_page()
         profile = Path.home() / ".local/share/raspberry-pi-web-kiosk/chromium"
         profile.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.execv(browser, browser_command(browser, url, profile))
