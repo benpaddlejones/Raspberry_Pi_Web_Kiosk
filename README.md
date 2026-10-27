@@ -81,6 +81,7 @@ recommended. USB boot must already be supported and enabled on your Pi.
 | Locale | `en_AU.UTF-8` |
 | Keyboard | US layout (standard for Australian keyboards) |
 | Wi-Fi country | `AU` |
+| Time servers | Google: `time1`-`time4.google.com`, fallback `time.google.com` |
 | Kiosk account | `kiosk`: unprivileged, locked password, automatic login |
 | Administrator | `kioskadmin`: password locked, no login |
 | SSH | Disabled |
@@ -88,6 +89,12 @@ recommended. USB boot must already be supported and enabled on your Pi.
 To build for another region, change `TIMEZONE_DEFAULT`, `LOCALE_DEFAULT`,
 `KEYBOARD_KEYMAP`, `KEYBOARD_LAYOUT` and `WPA_COUNTRY` in
 [build/config](build/config).
+
+The clock is set by `systemd-timesyncd` from Google Public NTP, configured in
+[system/timesyncd-google.conf](system/timesyncd-google.conf). Google smears leap
+seconds, so the file uses only Google servers. Networks that block outbound NTP
+(UDP port 123) prevent time sync, and HTTPS sites may then fail with certificate
+errors.
 
 The administrator password is a random value generated during each build and
 then removed, so nobody can log in with it and there is no shared default
@@ -219,7 +226,7 @@ The installer updates the OS, installs the kiosk packages, creates a separate
 unprivileged account, and configures automatic login on the first console. It
 also installs the Wi-Fi settings file and on-screen setup. It preserves existing
 `kiosk-url.txt` and `kiosk-wifi.txt` files and does not change your administrator,
-locale or timezone. It deliberately switches the device to a
+locale or timezone, but it does switch time sync to Google's servers. It deliberately switches the device to a
 dedicated kiosk boot session, so use a Pi dedicated to this purpose. An existing
 unmanaged account called `kiosk` causes installation to stop instead of changing
 that account's privileges or files.

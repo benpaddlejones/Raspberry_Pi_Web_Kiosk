@@ -10,7 +10,7 @@
       "Website configured in kiosk-url.txt on the Windows/macOS-readable boot partition",
       "On-screen network setup (nmtui) at first boot when no network is available; saved permanently",
       "Personal and enterprise Wi-Fi (PEAP, TTLS, TLS, PWD, FAST, LEAP) configured in kiosk-wifi.txt",
-      "Preset for Sydney: Australia/Sydney timezone, en_AU locale, AU Wi-Fi country",
+      "Preset for Sydney: Australia/Sydney timezone, en_AU locale, AU Wi-Fi country, Google time servers",
       "No first-boot account setup; the administrator account is locked",
       "Automatic browser restart after exit",
       "Daily updates from the official stable OS and security repositories"

@@ -83,6 +83,8 @@ install -D -m 0644 "$project_root/system/getty-autologin.conf" \
     /etc/systemd/system/getty@tty1.service.d/zz-web-kiosk.conf
 install -D -m 0644 "$project_root/system/chromium-policy.json" \
     /etc/chromium/policies/managed/web-kiosk.json
+install -D -m 0644 "$project_root/system/timesyncd-google.conf" \
+    /etc/systemd/timesyncd.conf.d/zz-web-kiosk.conf
 install -m 0644 "$project_root/system/20auto-upgrades" /etc/apt/apt.conf.d/20auto-upgrades
 install -m 0644 "$project_root/system/52web-kiosk-unattended-upgrades" \
     /etc/apt/apt.conf.d/52web-kiosk-unattended-upgrades
@@ -95,7 +97,7 @@ if [[ ! -e /boot/firmware/kiosk-wifi.txt ]]; then
 fi
 
 systemctl set-default multi-user.target
-systemctl enable getty@tty1.service NetworkManager-wait-online.service \
+systemctl enable getty@tty1.service NetworkManager-wait-online.service systemd-timesyncd.service \
     web-kiosk-wifi.service web-kiosk-network-setup.service apt-daily.timer apt-daily-upgrade.timer
 if ! "$image_build"; then
     systemctl daemon-reload
