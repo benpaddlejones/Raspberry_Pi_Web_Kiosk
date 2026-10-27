@@ -1,0 +1,15 @@
+[Unit]
+Description=Apply Wi-Fi settings from the boot partition
+Wants=NetworkManager.service
+After=NetworkManager.service
+Before=NetworkManager-wait-online.service network-online.target getty@tty1.service
+RequiresMountsFor=/boot/firmware
+ConditionPathExists=/boot/firmware/kiosk-wifi.txt
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi.py
+SyslogIdentifier=web-kiosk-wifi
+
+[Install]
+WantedBy=multi-user.target

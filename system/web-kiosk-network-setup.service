@@ -1,0 +1,21 @@
+[Unit]
+Description=Kiosk network setup screen
+Wants=NetworkManager.service
+After=NetworkManager.service web-kiosk-wifi.service systemd-user-sessions.service
+Before=getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/web-kiosk-network-setup
+Environment=TERM=linux
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TimeoutStartSec=infinity
+SyslogIdentifier=web-kiosk-network-setup
+
+[Install]
+WantedBy=multi-user.target

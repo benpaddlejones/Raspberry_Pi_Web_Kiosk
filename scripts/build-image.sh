@@ -64,14 +64,17 @@ git -C "$pi_gen_dir" remote add origin https://github.com/RPi-Distro/pi-gen.git
 git -C "$pi_gen_dir" fetch --depth=1 origin "$pi_gen_revision"
 git -C "$pi_gen_dir" checkout --detach FETCH_HEAD
 cp "$project_root/build/config" "$pi_gen_dir/config"
-printf '\nIMG_NAME=%q\nWORK_DIR=%q\nDEPLOY_DIR=%q\n' \
-    "RaspberryPi_Web_Kiosk_v$version" "$run_dir/work" "$project_root/deploy" >> "$pi_gen_dir/config"
+first_user_pass="$(head -c 32 /dev/urandom | xxd -p -c 64)"
+printf '\nIMG_NAME=%q\nWORK_DIR=%q\nDEPLOY_DIR=%q\nFIRST_USER_PASS=%q\n' \
+    "RaspberryPi_Web_Kiosk_v$version" "$run_dir/work" "$project_root/deploy" \
+    "$first_user_pass" >> "$pi_gen_dir/config"
 cp -a "$project_root/build/stage-web-kiosk" "$pi_gen_dir/stage-web-kiosk"
 touch "$pi_gen_dir/stage2/SKIP_IMAGES"
 
 payload="$pi_gen_dir/stage-web-kiosk/00-install/files"
 install -d "$payload/scripts" "$payload/build/stage-web-kiosk/00-install"
 cp "$project_root/kiosk.py" "$project_root/kiosk-url.txt" \
+    "$project_root/kiosk_wifi.py" "$project_root/kiosk-wifi.txt" \
     "$project_root/THIRD_PARTY_NOTICES.md" "$payload/"
 cp "$project_root/scripts/install-kiosk.sh" "$payload/scripts/"
 cp -a "$project_root/system" "$payload/system"

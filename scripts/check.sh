@@ -6,10 +6,11 @@ cd "$project_root"
 
 python3 -B -m unittest discover -s tests -v
 python3 -B kiosk.py --config kiosk-url.txt --check
+python3 -B kiosk_wifi.py --config kiosk-wifi.txt --check
 python3 -B scripts/release.py metadata
 
 mapfile -d '' scripts < <(find scripts system build/stage-web-kiosk \
-    -type f \( -name '*.sh' -o -name 'web-kiosk-session' -o -name '*.bash_profile' \) -print0)
+    -type f \( -name '*.sh' -o -name 'web-kiosk-session' -o -name 'web-kiosk-network-setup' -o -name '*.bash_profile' \) -print0)
 for script in "${scripts[@]}"; do
     bash -n "$script"
 done

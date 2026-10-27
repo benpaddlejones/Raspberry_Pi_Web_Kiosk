@@ -8,4 +8,8 @@ on_chroot <<'EOF'
 bash /opt/web-kiosk-installer/scripts/install-kiosk.sh --image
 EOF
 
+on_chroot <<EOF
+usermod --password '!' '${FIRST_USER_NAME:?}'
+EOF
+
 rm -r -- "$ROOTFS_DIR/opt/web-kiosk-installer"

@@ -46,6 +46,11 @@ if [[ -e /boot/firmware/kiosk-url.txt ]]; then
 else
     python3 "$project_root/kiosk.py" --config "$project_root/kiosk-url.txt" --check
 fi
+if [[ -e /boot/firmware/kiosk-wifi.txt ]]; then
+    python3 "$project_root/kiosk_wifi.py" --config /boot/firmware/kiosk-wifi.txt --check
+else
+    python3 "$project_root/kiosk_wifi.py" --config "$project_root/kiosk-wifi.txt" --check
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -64,9 +69,15 @@ fi
 passwd --lock kiosk
 
 install -D -m 0755 "$project_root/kiosk.py" /usr/local/lib/raspberry-pi-web-kiosk/kiosk.py
+install -m 0755 "$project_root/kiosk_wifi.py" /usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi.py
+install -m 0644 "$project_root/system/web-kiosk-wifi.service" \
+    /etc/systemd/system/web-kiosk-wifi.service
 install -D -m 0644 "$project_root/THIRD_PARTY_NOTICES.md" \
     /usr/share/doc/raspberry-pi-web-kiosk/THIRD_PARTY_NOTICES.md
 install -m 0755 "$project_root/system/web-kiosk-session" /usr/local/bin/web-kiosk-session
+install -m 0755 "$project_root/system/web-kiosk-network-setup" /usr/local/bin/web-kiosk-network-setup
+install -m 0644 "$project_root/system/web-kiosk-network-setup.service" \
+    /etc/systemd/system/web-kiosk-network-setup.service
 install -m 0644 -o kiosk -g kiosk "$project_root/system/kiosk.bash_profile" /home/kiosk/.bash_profile
 install -D -m 0644 "$project_root/system/getty-autologin.conf" \
     /etc/systemd/system/getty@tty1.service.d/zz-web-kiosk.conf
@@ -79,14 +90,17 @@ install -m 0644 "$project_root/system/52web-kiosk-unattended-upgrades" \
 if [[ ! -e /boot/firmware/kiosk-url.txt ]]; then
     install -m 0644 "$project_root/kiosk-url.txt" /boot/firmware/kiosk-url.txt
 fi
+if [[ ! -e /boot/firmware/kiosk-wifi.txt ]]; then
+    install -m 0644 "$project_root/kiosk-wifi.txt" /boot/firmware/kiosk-wifi.txt
+fi
 
 systemctl set-default multi-user.target
 systemctl enable getty@tty1.service NetworkManager-wait-online.service \
-    apt-daily.timer apt-daily-upgrade.timer
+    web-kiosk-wifi.service web-kiosk-network-setup.service apt-daily.timer apt-daily-upgrade.timer
 if ! "$image_build"; then
     systemctl daemon-reload
 fi
 
 printf '%s\n' \
-    'Kiosk installed. Edit kiosk-url.txt on the boot partition, then reboot.' \
+    'Kiosk installed. Edit kiosk-url.txt (and optionally kiosk-wifi.txt) on the boot partition, then reboot.' \
     'Daily stable/security updates are enabled; automatic reboots are disabled.'
