@@ -57,6 +57,8 @@ python3 -B "$rootfs/usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi.py" \
     || fail 'The network setup screen is not installed.'
 [[ "$(readlink "$rootfs/etc/localtime")" == */Australia/Sydney ]] \
     || fail 'The timezone is not Australia/Sydney.'
+grep -q '^NTP=time1.google.com' "$rootfs/etc/systemd/timesyncd.conf.d/zz-web-kiosk.conf" \
+    || fail 'Google time servers are not configured.'
 awk -F: '$1 == "kioskadmin" { locked = ($2 ~ /^[!*]/) } END { exit !locked }' \
     "$rootfs/etc/shadow" || fail 'The administrator account is not locked.'
 [[ -x "$rootfs/usr/bin/chromium" && -x "$rootfs/usr/bin/cage" ]] \
