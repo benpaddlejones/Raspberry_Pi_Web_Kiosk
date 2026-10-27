@@ -70,6 +70,8 @@ passwd --lock kiosk
 
 install -D -m 0755 "$project_root/kiosk.py" /usr/local/lib/raspberry-pi-web-kiosk/kiosk.py
 install -m 0755 "$project_root/kiosk_wifi.py" /usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi.py
+install -m 0755 "$project_root/kiosk_wifi_setup.py" \
+    /usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi_setup.py
 install -m 0644 "$project_root/system/web-kiosk-wifi.service" \
     /etc/systemd/system/web-kiosk-wifi.service
 install -D -m 0644 "$project_root/THIRD_PARTY_NOTICES.md" \

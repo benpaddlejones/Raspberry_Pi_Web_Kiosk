@@ -306,9 +306,8 @@ def _archive(config: Path) -> None:
     config.unlink()
 
 
-def apply(config: Path = DEFAULT_CONFIG, connection_dir: Path = CONNECTION_DIR,
-          cert_dir: Path = CERT_DIR) -> Connection:
-    connection = build_connection(read_settings(config), config.parent, cert_dir)
+def save_connection(connection: Connection, connection_dir: Path = CONNECTION_DIR,
+                    cert_dir: Path = CERT_DIR) -> None:
     cert_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     for source, destination in connection.files:
         _write_private(destination, source.read_bytes())
@@ -323,6 +322,11 @@ def apply(config: Path = DEFAULT_CONFIG, connection_dir: Path = CONNECTION_DIR,
         keyfile.unlink(missing_ok=True)
         raise ConfigError(f"NetworkManager rejected the settings: {result.stderr.strip()}")
 
+
+def apply(config: Path = DEFAULT_CONFIG, connection_dir: Path = CONNECTION_DIR,
+          cert_dir: Path = CERT_DIR) -> Connection:
+    connection = build_connection(read_settings(config), config.parent, cert_dir)
+    save_connection(connection, connection_dir, cert_dir)
     _archive(config)
     for source, _ in connection.files:
         source.unlink(missing_ok=True)

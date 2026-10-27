@@ -74,7 +74,7 @@ touch "$pi_gen_dir/stage2/SKIP_IMAGES"
 payload="$pi_gen_dir/stage-web-kiosk/00-install/files"
 install -d "$payload/scripts" "$payload/build/stage-web-kiosk/00-install"
 cp "$project_root/kiosk.py" "$project_root/kiosk-url.txt" \
-    "$project_root/kiosk_wifi.py" "$project_root/kiosk-wifi.txt" \
+    "$project_root/kiosk_wifi.py" "$project_root/kiosk_wifi_setup.py" "$project_root/kiosk-wifi.txt" \
     "$project_root/THIRD_PARTY_NOTICES.md" "$payload/"
 cp "$project_root/scripts/install-kiosk.sh" "$payload/scripts/"
 cp -a "$project_root/system" "$payload/system"
