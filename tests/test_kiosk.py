@@ -2,10 +2,14 @@ import contextlib
 import io
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from kiosk import ConfigError, DEFAULT_CONFIG, browser_command, main, read_url, wait_for_network
+from kiosk import (
+    ConfigError, DEFAULT_CONFIG, behind_login_page, browser_command, main, read_url,
+    wait_for_login_page, wait_for_network,
+)
 
 
 class ReadUrlTests(unittest.TestCase):
@@ -106,11 +110,13 @@ class LauncherTests(unittest.TestCase):
     @patch("kiosk.os.execv")
     @patch("kiosk.shutil.which", return_value="/usr/bin/chromium")
     @patch("kiosk.os.geteuid", return_value=1000)
+    @patch("kiosk.wait_for_login_page")
     @patch("kiosk.wait_for_network")
-    def test_launches_chromium_with_private_profile(self, wait, get_user_id, which, execute):
+    def test_launches_chromium_with_private_profile(self, wait, portal, get_user_id, which, execute):
         with patch("kiosk.Path.home", return_value=self.home):
             self.assertEqual(main(["--config", str(self.config)]), 0)
         wait.assert_called_once_with("https://example.com")
+        portal.assert_called_once_with()
         profile = self.home / ".local/share/raspberry-pi-web-kiosk/chromium"
         self.assertTrue(profile.is_dir())
         self.assertEqual(profile.stat().st_mode & 0o777, 0o700)
@@ -137,6 +143,44 @@ class NetworkTests(unittest.TestCase):
         wait_for_network("http://192.168.1.20:8080/dashboard")
         connect.assert_called_once_with(("192.168.1.20", 8080), timeout=5)
         pause.assert_not_called()
+
+
+class LoginPageTests(unittest.TestCase):
+    def probe(self, response=None, error=None):
+        opener = MagicMock()
+        if error:
+            opener.open.side_effect = error
+        else:
+            opener.open.return_value.__enter__.return_value = MagicMock(status=response)
+        with patch("kiosk.urllib.request.build_opener", return_value=opener):
+            return behind_login_page()
+
+    def test_detects_redirect_and_intercepted_page(self):
+        redirect = urllib.error.HTTPError("http://probe", 302, "Found", {}, None)
+        self.assertTrue(self.probe(error=redirect))
+        self.assertTrue(self.probe(response=200))
+
+    def test_open_internet_blocked_or_unreachable_probe_does_not_wait(self):
+        self.assertFalse(self.probe(response=204))
+        blocked = urllib.error.HTTPError("http://probe", 403, "Forbidden", {}, None)
+        self.assertFalse(self.probe(error=blocked))
+        self.assertFalse(self.probe(error=urllib.error.URLError("unreachable")))
+
+    @patch("kiosk.time.sleep")
+    @patch("kiosk.behind_login_page", side_effect=[True, True, False])
+    def test_waits_until_login_page_clears(self, portal, pause):
+        with contextlib.redirect_stderr(io.StringIO()):
+            wait_for_login_page()
+        self.assertEqual(portal.call_count, 3)
+        self.assertEqual(pause.call_count, 2)
+
+    @patch("kiosk.time.sleep")
+    @patch("kiosk.time.monotonic", side_effect=[0, 10, 200])
+    @patch("kiosk.behind_login_page", return_value=True)
+    def test_gives_up_so_the_login_page_can_be_used(self, portal, clock, pause):
+        with contextlib.redirect_stderr(io.StringIO()):
+            wait_for_login_page(limit=180)
+        self.assertEqual(pause.call_count, 1)
 
 
 if __name__ == "__main__":

@@ -251,6 +251,12 @@ that account's privileges or files.
 - Startup waits until the configured website host's port is reachable. If the
 	network is slow or unavailable at boot, it retries every five seconds. This is
 	a startup check, not ongoing website health monitoring or proxy support.
+- If the network redirects to a web login page (for example the NSW DoE edge
+	portal while the firewall is still identifying the device), startup waits up
+	to three minutes for the redirect to clear before opening Chromium. Detection
+	uses Google's `http://connectivitycheck.gstatic.com/generate_204`; if that is
+	unreachable, startup is not delayed. After three minutes the browser opens on
+	the login page so someone can sign in.
 - Closing or crashing the browser ends the session; systemd restarts login after
 	five seconds and reads the URL again. Chromium retains its browser profile and
 	website cookies under the kiosk account, so logins can persist across restarts.
