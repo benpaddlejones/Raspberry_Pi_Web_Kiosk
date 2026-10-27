@@ -47,6 +47,18 @@ grep -qx 'VERSION_CODENAME=trixie' "$rootfs/etc/os-release" || fail 'Unexpected 
     || fail 'Raspberry Pi boot configuration is missing.'
 python3 -B "$rootfs/usr/local/lib/raspberry-pi-web-kiosk/kiosk.py" \
     --config "$mount_dir/boot/kiosk-url.txt" --check
+python3 -B "$rootfs/usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi.py" \
+    --config "$mount_dir/boot/kiosk-wifi.txt" --check
+[[ -f "$mount_dir/boot/kiosk-wifi.txt" ]] || fail 'The Wi-Fi settings template is missing.'
+[[ -L "$rootfs/etc/systemd/system/multi-user.target.wants/web-kiosk-wifi.service" ]] \
+    || fail 'Wi-Fi provisioning is not enabled.'
+[[ -L "$rootfs/etc/systemd/system/multi-user.target.wants/web-kiosk-network-setup.service" \
+    && -x "$rootfs/usr/local/bin/web-kiosk-network-setup" && -x "$rootfs/usr/bin/nmtui" ]] \
+    || fail 'The network setup screen is not installed.'
+[[ "$(readlink "$rootfs/etc/localtime")" == */Australia/Sydney ]] \
+    || fail 'The timezone is not Australia/Sydney.'
+awk -F: '$1 == "kioskadmin" { locked = ($2 ~ /^[!*]/) } END { exit !locked }' \
+    "$rootfs/etc/shadow" || fail 'The administrator account is not locked.'
 [[ -x "$rootfs/usr/bin/chromium" && -x "$rootfs/usr/bin/cage" ]] \
     || fail 'The browser or compositor is missing.'
 [[ -x "$rootfs/usr/local/bin/web-kiosk-session" ]] || fail 'The kiosk session is missing.'

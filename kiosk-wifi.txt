@@ -1,0 +1,86 @@
+# Wi-Fi settings for the Raspberry Pi Web Kiosk.
+#
+# Alternatively, leave this file unchanged and connect a USB keyboard: if the
+# Pi has no network at first boot it shows an on-screen setup instead.
+# Ethernet works without this file. To use Wi-Fi, remove the # from the start
+# of each line you need and fill in the value. Lines starting with # are ignored.
+# Do not put notes on the same line as a setting.
+#
+# On the next boot the Pi saves these settings, renames this file to
+# kiosk-wifi-applied.txt with the passwords removed, and deletes any
+# certificate or key files named below from this drive. If something is wrong,
+# the reason is written to kiosk-wifi-error.txt and nothing is changed.
+# The Wi-Fi country is Australia (AU).
+#
+# ---------------------------------------------------------------- Network
+# Network name (SSID), and whether it is hidden: yes or no.
+# ssid = MyNetwork
+# hidden = no
+#
+# Security, one of:
+#   none             No security (open network)
+#   owe              Enhanced Open
+#   wep              WEP 40/128-bit key or 128-bit passphrase (insecure)
+#   leap             LEAP (insecure)
+#   dynamic-wep      Dynamic WEP, 802.1X (insecure)
+#   wpa-personal     WPA & WPA2 Personal (default)
+#   wpa3-personal    WPA3 Personal
+#   wpa-enterprise   WPA & WPA2 Enterprise
+#   wpa3-enterprise  WPA3 Enterprise 192-bit (needs eap = tls)
+# security = wpa-personal
+#
+# Password or key. Used by all security types except none, owe and eap = tls.
+# password =
+#
+# ---------------------------------------------------------------- WEP only
+# Key type: key (40/128-bit key) or passphrase (128-bit passphrase).
+# wep-key-type = key
+# Key index: 1, 2, 3 or 4.
+# wep-key-index = 1
+# Authentication: open or shared.
+# wep-auth = open
+#
+# ------------------------------------- LEAP, Dynamic WEP and Enterprise
+# Username (identity).
+# username =
+#
+# Authentication method for dynamic-wep, wpa-enterprise and wpa3-enterprise:
+#   peap   Protected EAP (default)
+#   ttls   Tunneled TLS
+#   tls    TLS with a client certificate
+#   pwd    PWD
+#   fast   FAST
+#   leap   LEAP
+# eap = peap
+#
+# Anonymous identity (peap, ttls, fast).
+# anonymous-identity =
+#
+# Domain the server certificate must belong to (peap, ttls, tls).
+# domain =
+#
+# CA certificate (peap, ttls, tls). One of:
+#   a certificate file copied next to this file, for example: ca.pem
+#   system   use the operating system's trusted certificates
+#   none     no CA certificate is required (the network is not verified)
+# ca-cert = ca.pem
+#
+# PEAP version: auto, 0 or 1.
+# peap-version = auto
+#
+# Inner authentication:
+#   peap: mschapv2 (default), md5, gtc
+#   ttls: pap, chap, mschap, mschapv2 (default), mschapv2-no-eap, md5, gtc
+#   fast: gtc, mschapv2 (default)
+# inner-auth = mschapv2
+#
+# TLS only: user certificate, private key and its password, as files copied
+# next to this file. A .p12 file can be used for both certificate and key.
+# client-cert = user.pem
+# private-key = user.key
+# private-key-password =
+#
+# FAST only: PAC provisioning (anonymous, authenticated, both or disabled)
+# and an optional PAC file copied next to this file.
+# fast-provisioning = anonymous
+# pac-file =

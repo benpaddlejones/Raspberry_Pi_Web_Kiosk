@@ -1,0 +1,50 @@
+#!/bin/bash
+set -uo pipefail
+
+state_dir=/var/lib/raspberry-pi-web-kiosk
+done_marker="$state_dir/network-setup-done"
+trigger=/boot/firmware/kiosk-network-setup.txt
+
+mark_done() {
+    install -d -m 0755 "$state_dir"
+    touch "$done_marker"
+}
+
+forced=false
+if [[ -e "$trigger" ]]; then
+    forced=true
+    rm -f -- "$trigger"
+fi
+if ! "$forced"; then
+    [[ -e "$done_marker" ]] && exit 0
+    if nm-online --quiet --timeout=30; then
+        mark_done
+        exit 0
+    fi
+fi
+
+while true; do
+    clear
+    printf '%s\n' \
+        'Raspberry Pi Web Kiosk - network setup' \
+        '' \
+        'Connect a keyboard and press Enter to set up the network.' \
+        '  Home or personal Wi-Fi:  Activate a connection, then choose the network.' \
+        '  Enterprise Wi-Fi:        Edit a connection > Add > Wi-Fi.' \
+        'Choose Quit when finished. Settings are kept permanently.' \
+        '' \
+        'The kiosk starts in 60 seconds if no key is pressed.'
+    if ! read -r -t 60; then
+        exit 0
+    fi
+    nmtui
+    clear
+    printf '%s\n' 'Checking the connection...'
+    if nm-online --quiet --timeout=30; then
+        mark_done
+        printf '%s\n' 'Connected. Starting the kiosk.'
+        exit 0
+    fi
+    printf '%s\n' 'Still not connected. Press Enter to try again.'
+    read -r -t 60 || exit 0
+done

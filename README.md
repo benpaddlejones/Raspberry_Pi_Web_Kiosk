@@ -5,6 +5,10 @@ full-screen Chromium kiosk. Change the website by editing
 [kiosk-url.txt](kiosk-url.txt) on the boot drive's Windows/macOS-readable FAT
 partition. You do not need to access the Linux partition.
 
+The image is preset for Sydney and needs no setup in Raspberry Pi Imager or at
+first boot. Networking uses Ethernet, an on-screen setup at first boot, or
+[kiosk-wifi.txt](kiosk-wifi.txt), including enterprise (802.1X) Wi-Fi.
+
 The system uses **Raspberry Pi OS Lite (64-bit), Debian 13 Trixie**, the current
 stable Raspberry Pi OS release. Cage provides a dedicated Wayland kiosk session;
 Chromium is the Chrome-compatible browser packaged for Raspberry Pi. There is no
@@ -50,10 +54,9 @@ recommended. USB boot must already be supported and enabled on your Pi.
 	 includes verification instructions for Windows, macOS and Linux.
 2. In [Raspberry Pi Imager](https://www.raspberrypi.com/software/), choose your Pi,
 	 then **Use custom** and select the `.img.gz`. No extraction is necessary.
-3. In OS customisation, set your own administrator username and password.
-	 **Do not use `kiosk`: that name is reserved for the locked browser account.**
-	 Set Wi-Fi, country and timezone if needed; Ethernet with DHCP is the default.
-	 SSH is disabled unless you explicitly enable it during customisation.
+3. Skip OS customisation. The image is preset for Sydney (`Australia/Sydney`
+	 timezone, `en_AU.UTF-8` locale, US keyboard layout, `AU` Wi-Fi country) and
+	 needs no account setup at first boot. SSH is disabled.
 4. Write the image, then unplug and reinsert the boot drive into your computer.
 5. Open the readable `bootfs` partition and edit its `kiosk-url.txt` file.
 	 Put one complete URL on its own line, for example:
@@ -62,13 +65,35 @@ recommended. USB boot must already be supported and enabled on your Pi.
 	 https://example.com/dashboard
 	 ```
 
-6. Save as plain UTF-8 text, safely eject the drive, and connect it to the Pi.
-7. Connect HDMI and the network, then power on. After the normal first-boot
-	 provisioning, the Pi logs in as `kiosk` and starts Chromium automatically.
+6. For Wi-Fi, either connect a USB keyboard to use the on-screen setup at first
+	 boot, or edit `kiosk-wifi.txt` (see [Wi-Fi](#wi-fi)). Ethernet with DHCP
+	 needs no settings.
+7. Save as plain UTF-8 text, safely eject the drive, and connect it to the Pi.
+8. Connect HDMI and the network (or a keyboard for Wi-Fi setup), then power on.
+	 The Pi logs in as `kiosk` and starts Chromium automatically. The first boot
+	 can take up to about a minute longer while the Pi checks for a network.
 
-If Imager does not offer OS customisation, configure the administrator using
-Raspberry Pi OS's first-boot prompts with a keyboard, or use the existing-OS
-installation below. Do not skip account setup for an unattended installation.
+### Preset Region and Accounts
+
+| Setting | Value |
+|---|---|
+| Timezone | `Australia/Sydney` |
+| Locale | `en_AU.UTF-8` |
+| Keyboard | US layout (standard for Australian keyboards) |
+| Wi-Fi country | `AU` |
+| Kiosk account | `kiosk`: unprivileged, locked password, automatic login |
+| Administrator | `kioskadmin`: password locked, no login |
+| SSH | Disabled |
+
+To build for another region, change `TIMEZONE_DEFAULT`, `LOCALE_DEFAULT`,
+`KEYBOARD_KEYMAP`, `KEYBOARD_LAYOUT` and `WPA_COUNTRY` in
+[build/config](build/config).
+
+The administrator password is a random value generated during each build and
+then removed, so nobody can log in with it and there is no shared default
+password. To maintain or troubleshoot a device, reflash it, or use the
+existing-OS installation below on a Pi where you control the administrator
+account.
 
 If Windows asks to format another partition, **cancel**. That is the Linux root
 partition and must not be formatted. The configuration file belongs at the root
@@ -91,6 +116,89 @@ never executed as a shell script. Do not store secrets in this readable file.
 On the Pi, the same file is `/boot/firmware/kiosk-url.txt`. Changes take effect on
 the next kiosk start or reboot, not immediately in an already-open browser.
 
+## Wi-Fi
+
+There are three ways to connect. Saved connections are kept permanently, across
+reboots and OS updates.
+
+| Method | When to use | Keyboard needed |
+|---|---|---|
+| Ethernet (DHCP) | Wired network | No |
+| On-screen setup | Wi-Fi, without putting passwords on the card | Yes, at first boot |
+| `kiosk-wifi.txt` | Wi-Fi without a keyboard, WPA3 Enterprise 192-bit or EAP-FAST | No |
+
+At boot, `kiosk-wifi.txt` is applied first. If the Pi is then online, the
+on-screen setup is skipped.
+
+### On-screen Setup at First Boot
+
+If the Pi has no network connection at first boot, it shows a network setup
+screen before the kiosk starts. Connect a USB keyboard and press Enter to open
+NetworkManager's text setup tool, `nmtui`:
+
+- Personal Wi-Fi: **Activate a connection**, choose the network, enter the password.
+- Enterprise Wi-Fi: **Edit a connection > Add > Wi-Fi**, enter the SSID, then set
+	Security to *WPA & WPA2 Enterprise* and fill in the method (PEAP, TTLS, TLS,
+	PWD or MD5), identity, password, domain and CA certificate options.
+
+Choose **Quit** when finished. Once the Pi is online, it saves the connection
+permanently and skips this screen on later boots. Nothing is stored on the
+readable boot partition. If no key is pressed within 60 seconds, the kiosk
+starts anyway, and the screen appears again on the next boot until a network
+works. Anyone with a keyboard can change the network while this screen is shown.
+
+### Settings File
+
+`kiosk-wifi.txt` on `bootfs` offers the same choices as the Raspberry Pi OS
+desktop Wi-Fi dialog. Remove the `#` from the lines you need; every option is
+described in the file. For example, a WPA2 Enterprise PEAP network that does not
+provide a CA certificate:
+
+```text
+ssid = SchoolWiFi
+security = wpa-enterprise
+eap = peap
+username = jsmith
+password = your-password
+ca-cert = none
+```
+
+| Security | Settings |
+|---|---|
+| `none`, `owe` | `ssid`, `hidden` |
+| `wpa-personal`, `wpa3-personal` | `password` |
+| `wep` | `password`, `wep-key-type`, `wep-key-index`, `wep-auth` |
+| `leap` | `username`, `password` |
+| `wpa-enterprise`, `dynamic-wep`, `wpa3-enterprise` | `eap` = `peap`, `ttls`, `tls`, `pwd`, `fast` or `leap`, plus `username`, `password`, `anonymous-identity`, `domain`, `ca-cert`, `peap-version`, `inner-auth`, `client-cert`, `private-key`, `private-key-password`, `fast-provisioning`, `pac-file` as relevant |
+
+Certificate and key files are copied next to `kiosk-wifi.txt` on `bootfs` and
+named in it, for example `ca-cert = ca.pem`. Use `ca-cert = system` to trust the
+OS certificate store, or `ca-cert = none` to skip server verification. `none`
+matches the dialog's "No CA certificate is required" option, but it lets a fake
+access point capture the password. Prefer a CA certificate and `domain`. WEP,
+LEAP and dynamic WEP are insecure and provided only for legacy networks.
+
+On the next boot, a root service validates the file and saves a NetworkManager
+connection that only root can read. It then renames the file to
+`kiosk-wifi-applied.txt` with the passwords removed and deletes the certificate
+and key files from `bootfs`. If the settings are invalid, nothing is changed and
+the reason is written to `kiosk-wifi-error.txt`. To change Wi-Fi, create a new
+`kiosk-wifi.txt` (for example, from `kiosk-wifi-applied.txt`) and re-enter the
+passwords.
+
+Deleted files on a FAT drive can be recovered with forensic tools. Treat a lost
+or discarded boot drive that held Wi-Fi credentials as exposed, and change the
+password. The on-screen setup avoids this.
+
+### Change Wi-Fi Later
+
+Shut down the Pi and move the boot drive to another computer, then either:
+
+- create an empty `kiosk-network-setup.txt` on `bootfs` to show the on-screen
+	setup on the next boot, even when a network is available; or
+- create a new `kiosk-wifi.txt`. It replaces the connection previously saved from
+	this file. A connection added on screen is kept alongside it.
+
 ## Install on Existing Raspberry Pi OS
 
 Start with an updated **Raspberry Pi OS Lite (64-bit), Trixie** installation and
@@ -109,7 +217,9 @@ sudo reboot
 
 The installer updates the OS, installs the kiosk packages, creates a separate
 unprivileged account, and configures automatic login on the first console. It
-preserves an existing URL file. It deliberately switches the device to a
+also installs the Wi-Fi settings file and on-screen setup. It preserves existing
+`kiosk-url.txt` and `kiosk-wifi.txt` files and does not change your administrator,
+locale or timezone. It deliberately switches the device to a
 dedicated kiosk boot session, so use a Pi dedicated to this purpose. An existing
 unmanaged account called `kiosk` causes installation to stop instead of changing
 that account's privileges or files.
@@ -131,7 +241,8 @@ that account's privileges or files.
 	and Raspberry Pi repositories. Major OS releases are not automatically selected.
 	Automatic reboots are disabled to avoid interrupting the display.
 - Schedule a maintenance reboot to activate kernel changes and restart Chromium
-	with its updated binary. For manual maintenance, log in as your administrator:
+	with its updated binary. On existing-OS installations, manual maintenance is
+	done as your administrator:
 
 	```bash
 	sudo apt-get update
@@ -140,9 +251,10 @@ that account's privileges or files.
 	```
 
 Physical keyboard access can switch to another console with Ctrl+Alt+F2 for
-administrator login; Ctrl+Alt+F1 returns to the kiosk. Kiosk mode is not a physical
-security boundary. For a public unattended display, restrict access to the
-keyboard, boot media and network. To shut down safely:
+administrator login on existing-OS installations; Ctrl+Alt+F1 returns to the
+kiosk. Kiosk mode is not a physical security boundary. For a public unattended
+display, restrict access to the keyboard, boot media and network. To shut down
+safely from an administrator console:
 
 ```bash
 sudo poweroff
@@ -150,11 +262,21 @@ sudo poweroff
 
 ## Troubleshooting
 
-From an administrator console or SSH session, validate the URL and inspect logs:
+The released image has no administrator login. On the image:
+
+- **No network:** create `kiosk-network-setup.txt` on `bootfs`, connect a keyboard
+	and reboot to use the on-screen setup.
+- **`kiosk-wifi.txt` not applied:** read `kiosk-wifi-error.txt` on `bootfs`, fix
+	the file and reboot.
+- **Wrong website:** check `kiosk-url.txt` as described above.
+
+On an existing-OS installation, use an administrator console or SSH session to
+validate the settings and inspect logs:
 
 ```bash
 python3 /usr/local/lib/raspberry-pi-web-kiosk/kiosk.py --check
-journalctl -b -t web-kiosk --no-pager
+python3 /usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi.py --check
+journalctl -b -t web-kiosk -t web-kiosk-wifi -t web-kiosk-network-setup --no-pager
 sudo systemctl status getty@tty1.service
 nmcli device status
 ```
@@ -183,7 +305,8 @@ bash scripts/check.sh
 
 The check script also runs ShellCheck and actionlint when installed; the release
 workflow installs both. Tests cover Windows text files, URL validation, safe
-browser arguments, startup retries, release metadata and checksum verification.
+browser arguments, startup retries, Wi-Fi settings parsing and secret removal,
+release metadata and checksum verification.
 
 For a local image build, use a dedicated native ARM64 Debian/Ubuntu host with
 root privileges, loop-device support and at least 20 GiB free. Install the build
@@ -200,11 +323,17 @@ out of `deploy/` before rebuilding. Ordinary x86-64 Codespaces can run source
 checks but are not the supported image-build host. Update the pinned pi-gen
 revision deliberately when adopting upstream build changes.
 
-Before promoting a release, test on a physical target Pi: Imager provisioning,
-cold boot, automatic login, full-screen HDMI output, a URL change made from a
-Windows/macOS computer, delayed networking, browser restart, and an OS upgrade
-followed by reboot. Image filesystem validation does not emulate the GPU or prove
-that a physical Pi boots successfully.
+Before promoting a release, test on a physical target Pi:
+
+- unattended first boot without Imager customisation, and Sydney time;
+- cold boot, automatic login and full-screen HDMI output;
+- a URL change made from a Windows/macOS computer;
+- the on-screen network setup, with personal and PEAP Wi-Fi;
+- WPA2 Personal and Enterprise (PEAP) Wi-Fi from `kiosk-wifi.txt`;
+- delayed networking, browser restart, and an OS upgrade followed by reboot.
+
+Image filesystem validation does not emulate the GPU or prove that a physical Pi
+boots successfully.
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the reused components and
 their licenses.
