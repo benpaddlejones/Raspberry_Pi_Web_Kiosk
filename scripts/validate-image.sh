@@ -53,7 +53,9 @@ python3 -B "$rootfs/usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi.py" \
 [[ -L "$rootfs/etc/systemd/system/multi-user.target.wants/web-kiosk-wifi.service" ]] \
     || fail 'Wi-Fi provisioning is not enabled.'
 [[ -L "$rootfs/etc/systemd/system/multi-user.target.wants/web-kiosk-network-setup.service" \
-    && -x "$rootfs/usr/local/bin/web-kiosk-network-setup" && -x "$rootfs/usr/bin/nmtui" ]] \
+    && -x "$rootfs/usr/local/bin/web-kiosk-network-setup" && -x "$rootfs/usr/bin/nmtui" \
+    && -x "$rootfs/usr/bin/whiptail" \
+    && -f "$rootfs/usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi_setup.py" ]] \
     || fail 'The network setup screen is not installed.'
 [[ "$(readlink "$rootfs/etc/localtime")" == */Australia/Sydney ]] \
     || fail 'The timezone is not Australia/Sydney.'

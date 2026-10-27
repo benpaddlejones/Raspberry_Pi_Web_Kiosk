@@ -8,5 +8,6 @@ pipewire-audio
 ca-certificates
 python3
 network-manager
+whiptail
 systemd-timesyncd
 unattended-upgrades

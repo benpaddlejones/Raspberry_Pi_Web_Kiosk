@@ -132,7 +132,7 @@ reboots and OS updates.
 |---|---|---|
 | Ethernet (DHCP) | Wired network | No |
 | On-screen setup | Wi-Fi, without putting passwords on the card | Yes, at first boot |
-| `kiosk-wifi.txt` | Wi-Fi without a keyboard, WPA3 Enterprise 192-bit or EAP-FAST | No |
+| `kiosk-wifi.txt` | Wi-Fi without a keyboard, WPA3 Enterprise 192-bit, Dynamic WEP or EAP-FAST | No |
 
 At boot, `kiosk-wifi.txt` is applied first. If the Pi is then online, the
 on-screen setup is skipped.
@@ -140,19 +140,31 @@ on-screen setup is skipped.
 ### On-screen Setup at First Boot
 
 If the Pi has no network connection at first boot, it shows a network setup
-screen before the kiosk starts. Connect a USB keyboard and press Enter to open
-NetworkManager's text setup tool, `nmtui`:
+screen before the kiosk starts. Connect a USB keyboard and press Enter. Use the
+arrow keys to move, Enter to choose, and Tab to reach the buttons.
 
-- Personal Wi-Fi: **Activate a connection**, choose the network, enter the password.
-- Enterprise Wi-Fi: **Edit a connection > Add > Wi-Fi**, enter the SSID, then set
-	Security to *WPA & WPA2 Enterprise* and fill in the method (PEAP, TTLS, TLS,
-	PWD or MD5), identity, password, domain and CA certificate options.
+1. Choose **Connect to Wi-Fi**. The Pi lists nearby networks with their signal
+	and how they sign in (*password* or *username + password*). Choose yours, or
+	**Hidden network** to type a name.
+2. Enter what it asks for:
+	- *Password* networks: the Wi-Fi password.
+	- *Username + password* (enterprise) networks: your username, your password,
+	  and whether IT provides a CA certificate. Choose **No certificate** if
+	  you don't have one. PEAP with MSCHAPv2, the most common setup, is used.
+3. The Pi connects and reports the result: connected, wrong username or password,
+	network not found, or connected but a web login page is required. Choose
+	**Connect to Wi-Fi** again to retry.
+4. Choose **Finish and start the kiosk**.
 
-Choose **Quit** when finished. Once the Pi is online, it saves the connection
-permanently and skips this screen on later boots. Nothing is stored on the
-readable boot partition. If no key is pressed within 60 seconds, the kiosk
-starts anyway, and the screen appears again on the next boot until a network
-works. Anyone with a keyboard can change the network while this screen is shown.
+**Advanced network settings** opens NetworkManager's full text tool, `nmtui`,
+for anything else (TTLS, TLS, static IP addresses). In `nmtui`, enterprise
+networks must be added with **Edit a connection > Add > Wi-Fi**.
+
+Settings are saved permanently in the Pi's protected system storage; nothing is
+written to the readable boot partition. Once online, the screen is skipped on
+later boots. If no key is pressed within 60 seconds, the kiosk starts anyway, and
+the screen appears again on the next boot until a network works. Anyone with a
+keyboard can change the network while this screen is shown.
 
 ### Settings File
 
@@ -335,7 +347,8 @@ Before promoting a release, test on a physical target Pi:
 - unattended first boot without Imager customisation, and Sydney time;
 - cold boot, automatic login and full-screen HDMI output;
 - a URL change made from a Windows/macOS computer;
-- the on-screen network setup, with personal and PEAP Wi-Fi;
+- the guided on-screen setup with personal and PEAP Wi-Fi, a wrong password,
+	and a network with a web login page;
 - WPA2 Personal and Enterprise (PEAP) Wi-Fi from `kiosk-wifi.txt`;
 - delayed networking, browser restart, and an OS upgrade followed by reboot.
 

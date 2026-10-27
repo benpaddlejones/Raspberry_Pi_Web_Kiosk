@@ -28,16 +28,14 @@ while true; do
     printf '%s\n' \
         'Raspberry Pi Web Kiosk - network setup' \
         '' \
-        'Connect a keyboard and press Enter to set up the network.' \
-        '  Home or personal Wi-Fi:  Activate a connection, then choose the network.' \
-        '  Enterprise Wi-Fi:        Edit a connection > Add > Wi-Fi.' \
-        'Choose Quit when finished. Settings are kept permanently.' \
+        'To set up or change Wi-Fi, connect a keyboard and press Enter.' \
+        'Or plug in an Ethernet cable and wait.' \
         '' \
         'The kiosk starts in 60 seconds if no key is pressed.'
     if ! read -r -t 60; then
         exit 0
     fi
-    nmtui
+    python3 /usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi_setup.py
     clear
     printf '%s\n' 'Checking the connection...'
     if nm-online --quiet --timeout=30; then
