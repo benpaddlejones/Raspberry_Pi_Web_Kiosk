@@ -1,0 +1,8 @@
+[Unit]
+Description=Copy kiosk logs to the boot partition
+RequiresMountsFor=/boot/firmware
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/web-kiosk-log
+SyslogIdentifier=web-kiosk-log

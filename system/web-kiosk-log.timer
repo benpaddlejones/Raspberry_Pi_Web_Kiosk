@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh kiosk-log.txt on the boot partition
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=90s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

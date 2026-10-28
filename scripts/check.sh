@@ -11,7 +11,7 @@ python3 -B kiosk_portal.py --config kiosk-portal.txt --check
 python3 -B scripts/release.py metadata
 
 mapfile -d '' scripts < <(find scripts system build/stage-web-kiosk \
-    -type f \( -name '*.sh' -o -name 'web-kiosk-session' -o -name 'web-kiosk-network-setup' -o -name '*.bash_profile' \) -print0)
+    -type f \( -name '*.sh' -o -name 'web-kiosk-session' -o -name 'web-kiosk-network-setup' -o -name 'web-kiosk-log' -o -name '*.bash_profile' \) -print0)
 for script in "${scripts[@]}"; do
     bash -n "$script"
 done

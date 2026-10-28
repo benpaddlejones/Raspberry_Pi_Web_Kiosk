@@ -57,6 +57,9 @@ python3 -B "$rootfs/usr/local/lib/raspberry-pi-web-kiosk/kiosk_portal.py" \
 [[ -f "$mount_dir/boot/kiosk-portal.txt" ]] || fail 'The portal sign-in settings are missing.'
 [[ -L "$rootfs/etc/systemd/system/multi-user.target.wants/web-kiosk-portal.service" ]] \
     || fail 'Portal sign-in is not enabled.'
+[[ -L "$rootfs/etc/systemd/system/timers.target.wants/web-kiosk-log.timer" \
+    && -x "$rootfs/usr/local/bin/web-kiosk-log" ]] \
+    || fail 'The boot partition log is not enabled.'
 [[ -L "$rootfs/etc/systemd/system/multi-user.target.wants/web-kiosk-network-setup.service" \
     && -x "$rootfs/usr/local/bin/web-kiosk-network-setup" && -x "$rootfs/usr/bin/nmtui" \
     && -x "$rootfs/usr/bin/whiptail" \

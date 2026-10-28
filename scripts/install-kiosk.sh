@@ -86,6 +86,11 @@ install -D -m 0644 "$project_root/THIRD_PARTY_NOTICES.md" \
     /usr/share/doc/raspberry-pi-web-kiosk/THIRD_PARTY_NOTICES.md
 install -m 0755 "$project_root/system/web-kiosk-session" /usr/local/bin/web-kiosk-session
 install -m 0755 "$project_root/system/web-kiosk-network-setup" /usr/local/bin/web-kiosk-network-setup
+install -m 0755 "$project_root/system/web-kiosk-log" /usr/local/bin/web-kiosk-log
+install -m 0644 "$project_root/system/web-kiosk-log.service" \
+    /etc/systemd/system/web-kiosk-log.service
+install -m 0644 "$project_root/system/web-kiosk-log.timer" \
+    /etc/systemd/system/web-kiosk-log.timer
 install -m 0644 "$project_root/system/web-kiosk-network-setup.service" \
     /etc/systemd/system/web-kiosk-network-setup.service
 install -m 0644 -o kiosk -g kiosk "$project_root/system/kiosk.bash_profile" /home/kiosk/.bash_profile
@@ -112,7 +117,7 @@ fi
 systemctl set-default multi-user.target
 systemctl enable getty@tty1.service NetworkManager-wait-online.service systemd-timesyncd.service \
     web-kiosk-wifi.service web-kiosk-portal.service web-kiosk-network-setup.service \
-    apt-daily.timer apt-daily-upgrade.timer
+    web-kiosk-log.timer apt-daily.timer apt-daily-upgrade.timer
 if ! "$image_build"; then
     systemctl daemon-reload
 fi

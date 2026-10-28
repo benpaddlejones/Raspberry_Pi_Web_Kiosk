@@ -4,6 +4,7 @@
 import argparse
 import contextlib
 import hashlib
+import http.client
 import http.cookiejar
 import json
 import re
@@ -137,7 +138,7 @@ def make_opener():
     )
 
 
-def _unreachable(error: OSError) -> PortalError:
+def _unreachable(error: Exception) -> PortalError:
     reason = error.reason if isinstance(error, urllib.error.URLError) else error
     if isinstance(reason, ssl.SSLError):
         return PortalError("The login page's certificate is not trusted, so nothing was sent.")
@@ -151,7 +152,7 @@ def fetch(opener, url: str, form: dict[str, str] | None = None) -> tuple[int, st
             return response.status, response.read(MAX_PAGE_BYTES).decode("utf-8", "replace")
     except urllib.error.HTTPError as error:
         return error.code, error.read(MAX_PAGE_BYTES).decode("utf-8", "replace")
-    except OSError as error:
+    except (OSError, http.client.HTTPException) as error:
         raise _unreachable(error) from error
 
 
@@ -211,9 +212,10 @@ def check_once(config: Path = DEFAULT_CONFIG, state_path: Path = STATE_FILE,
 
     probe = probe_network(site)
     if probe.state == "blocked":
+        detail = f" ({probe.detail})" if probe.detail else ""
         return (
             "The kiosk website is not answering and the network did not offer a login page, "
-            "so nothing was sent."
+            f"so nothing was sent.{detail}"
         )
     if probe.state == "open":
         state = load_state(state_path)
@@ -273,6 +275,8 @@ def run(config: Path) -> None:
             message = check_once(config)
         except PortalError as error:
             message = str(error)
+        except Exception as error:  # A daemon that crashes would be restarted in a loop.
+            message = f"Unexpected error ({type(error).__name__}); will try again."
         if message != previous:
             print(message, flush=True)
             write_status(config, message)
