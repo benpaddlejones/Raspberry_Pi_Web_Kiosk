@@ -1,4 +1,5 @@
 import contextlib
+import http.client
 import io
 import ssl
 import tempfile
@@ -96,6 +97,12 @@ class NetworkTests(unittest.TestCase):
         with self.assertRaisesRegex(PortalError, "Could not reach"):
             portal.fetch(opener, LOCATION)
 
+    def test_garbled_responses_are_reported_not_raised(self):
+        opener = MagicMock()
+        opener.open.side_effect = http.client.BadStatusLine("junk")
+        with self.assertRaisesRegex(PortalError, "Could not reach"):
+            portal.fetch(opener, LOCATION)
+
     def test_http_errors_return_their_page(self):
         opener = MagicMock()
         error = urllib.error.HTTPError(LOCATION, 302, "Found", {}, io.BytesIO(b"page"))
@@ -161,6 +168,12 @@ class CheckOnceTests(PortalTestCase):
         self.config.write_text("# portal = none\n", encoding="utf-8")
         self.assertIn("is off", self.check())
         self.probe_network.assert_not_called()
+
+    def test_blocked_status_says_what_the_network_did(self):
+        self.probe_network.return_value = Probe("blocked", detail="http://x answered 301; https://x failed (SSLError)")
+        message = self.check()
+        self.assertIn("(http://x answered 301; https://x failed (SSLError))", message)
+        self.assertIn("nothing was sent", message)
 
     def test_nothing_to_do_when_the_site_answers_and_nothing_sent_when_blocked(self):
         for state, text in (("open", "no sign-in needed"), ("blocked", "nothing was sent")):
@@ -302,15 +315,19 @@ class RunAndCommandTests(PortalTestCase):
             self.assertEqual(portal.main(["--config", str(self.config), "--enabled"]), 1)
         self.assertIn("one host name", (self.boot / "kiosk-portal-status.txt").read_text(encoding="utf-8"))
 
-    def test_run_reports_only_changes(self):
-        class Stop(Exception):
+    def test_run_reports_only_changes_and_survives_unexpected_errors(self):
+        class Stop(BaseException):
             pass
 
-        with patch.object(portal, "check_once", side_effect=["a", "a", PortalError("b"), Stop()]), \
+        results = ["a", "a", PortalError("b"), RuntimeError("boom"), Stop()]
+        with patch.object(portal, "check_once", side_effect=results), \
                 patch.object(portal.time, "sleep"), patch.object(portal, "write_status") as write, \
                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(Stop):
             portal.run(self.config)
-        self.assertEqual([call.args[1] for call in write.call_args_list], ["a", "b"])
+        self.assertEqual(
+            [call.args[1] for call in write.call_args_list],
+            ["a", "b", "Unexpected error (RuntimeError); will try again."],
+        )
 
 
 if __name__ == "__main__":

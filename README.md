@@ -243,7 +243,10 @@ redirecting a request for your site. Each check therefore requests the plain
 HTTP address of your site first: an unsigned network normally bounces that
 straight to its login page. If the login page is on the host named above, the Pi
 signs in and checks the kiosk page again. If the network refuses the site without
-offering a login page, nothing is sent and `kiosk-portal-status.txt` says so. It
+offering a login page, nothing is sent and `kiosk-portal-status.txt` says so,
+listing what each request to your site got (host and status only, for example
+`http://example.org answered 301 redirecting to example.org; https://example.org
+failed (ConnectionResetError)`). It
 repeats this if the firewall login later expires. The setting is read when the Pi
 boots, so reboot after changing it.
 
@@ -316,7 +319,9 @@ that account's privileges or files.
 	service signs in, then opens Chromium either way. With no portal set, it waits
 	only if the network redirects the site to a login page, and does not wait for a
 	site that is simply unreachable. After the wait, the browser opens even if the
-	login has not completed, so someone can sign in.
+	login has not completed, so someone can sign in. The screen stays blank during
+	the wait. A failure in this check is logged and skipped; it never stops the
+	kiosk starting.
 - Closing or crashing the browser ends the session; systemd restarts login after
 	five seconds and reads the URL again. Chromium retains its browser profile and
 	website cookies under the kiosk account, so logins can persist across restarts.
@@ -349,6 +354,12 @@ sudo poweroff
 
 The released image has no administrator login. On the image:
 
+- **Crashes, restarts or a blank screen:** shut the Pi down cleanly and open
+	`kiosk-log.txt` on `bootfs`. It is refreshed about every 90 seconds and shows
+	the kiosk session, sign-in and network setup messages and recent warnings from
+	this boot, plus the power status (`throttled=0x0` is healthy; anything else
+	means under-voltage or overheating). It contains network names and device
+	details but never passwords. Share it when asking for help.
 - **No network:** create `kiosk-network-setup.txt` on `bootfs`, connect a keyboard
 	and reboot to use the on-screen setup.
 - **`kiosk-wifi.txt` not applied:** read `kiosk-wifi-error.txt` on `bootfs`, fix

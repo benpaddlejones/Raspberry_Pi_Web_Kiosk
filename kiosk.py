@@ -2,15 +2,17 @@
 """Launch a Raspberry Pi web kiosk configured on the readable boot partition."""
 
 import argparse
+import http.client
 import os
+import re
 import shutil
 import socket
 import sys
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import NamedTuple
 from urllib.parse import urljoin, urlsplit
 
 
@@ -85,9 +87,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-class Probe(NamedTuple):
+@dataclass(frozen=True)
+class Probe:
     state: str  # open, portal or blocked
     location: str = ""
+    detail: str = field(default="", compare=False)  # hosts and statuses only, never paths or tokens
 
 
 def probe_address(url: str) -> str:
@@ -102,28 +106,41 @@ def _site_name(address: str) -> str:
     return (urlsplit(address).hostname or "").lower().removeprefix("www.")
 
 
+def _hostname(address: str) -> str:
+    return re.sub(r"[^A-Za-z0-9.:\[\]-]", "?", urlsplit(address).hostname or "")[:100]
+
+
 def _request(target: str, timeout: float) -> Probe:
     site = _site_name(target)
     opener = urllib.request.build_opener(NoRedirect)
+    steps: list[str] = []
     for _ in range(MAX_SITE_REDIRECTS + 1):
+        origin = f"{urlsplit(target).scheme}://{_hostname(target)}"
         try:
             with opener.open(target, timeout=timeout) as response:
-                return Probe("open") if response.status == 200 else Probe("blocked")
+                steps.append(f"{origin} answered {response.status}")
+                return Probe("open" if response.status == 200 else "blocked", detail="; ".join(steps))
         except urllib.error.HTTPError as error:
+            steps.append(f"{origin} answered {error.code}")
             location = error.headers.get("Location", "") if 300 <= error.code < 400 else ""
             if not location:
-                return Probe("blocked")
+                return Probe("blocked", detail="; ".join(steps))
             try:
                 destination = urljoin(target, location)
                 same_site = _site_name(destination) == site
+                steps[-1] += f" redirecting to {_hostname(destination)}"
             except ValueError:
-                return Probe("portal", location)
+                steps[-1] += " redirecting to an invalid address"
+                return Probe("portal", location, "; ".join(steps))
             if not same_site:
-                return Probe("portal", destination)
+                return Probe("portal", destination, "; ".join(steps))
             target = destination
-        except OSError:
-            return Probe("blocked")
-    return Probe("blocked")
+        except (OSError, http.client.HTTPException) as error:
+            reason = error.reason if isinstance(error, urllib.error.URLError) else error
+            steps.append(f"{origin} failed ({type(reason).__name__})")
+            return Probe("blocked", detail="; ".join(steps))
+    steps.append("too many redirects")
+    return Probe("blocked", detail="; ".join(steps))
 
 
 def probe_network(url: str, timeout: float = 10) -> Probe:
@@ -132,7 +149,10 @@ def probe_network(url: str, timeout: float = 10) -> Probe:
         return _request(url, timeout)
     # Unsigned networks normally bounce plain HTTP straight to their login page.
     plain = _request(probe_address(url), timeout)
-    return plain if plain.state == "portal" else _request(url, timeout)
+    if plain.state == "portal":
+        return plain
+    final = _request(url, timeout)
+    return replace(final, detail="; ".join(part for part in (plain.detail, final.detail) if part))
 
 
 def portal_configured() -> bool:
@@ -180,7 +200,10 @@ def main(arguments: list[str] | None = None) -> int:
             raise ConfigError("Chromium is not installed.")
 
         wait_for_network(url)
-        wait_for_login_page(url, until_reachable=portal_configured())
+        try:
+            wait_for_login_page(url, until_reachable=portal_configured())
+        except Exception as error:  # The login wait is optional; it must never stop the kiosk starting.
+            print(f"Skipping the network login wait: {type(error).__name__}", file=sys.stderr, flush=True)
         profile = Path.home() / ".local/share/raspberry-pi-web-kiosk/chromium"
         profile.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.execv(browser, browser_command(browser, url, profile))

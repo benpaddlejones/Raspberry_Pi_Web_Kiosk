@@ -1,4 +1,5 @@
 import contextlib
+import http.client
 import io
 import ssl
 import tempfile
@@ -127,6 +128,19 @@ class LauncherTests(unittest.TestCase):
             browser_command("/usr/bin/chromium", "https://example.com", profile),
         )
 
+    @patch("kiosk.os.execv")
+    @patch("kiosk.shutil.which", return_value="/usr/bin/chromium")
+    @patch("kiosk.os.geteuid", return_value=1000)
+    @patch("kiosk.portal_configured", return_value=True)
+    @patch("kiosk.wait_for_login_page", side_effect=RuntimeError("boom"))
+    @patch("kiosk.wait_for_network")
+    def test_a_failing_login_wait_never_stops_the_browser(
+        self, wait, portal, configured, get_user_id, which, execute
+    ):
+        with patch("kiosk.Path.home", return_value=self.home):
+            self.assertEqual(main(["--config", str(self.config)]), 0)
+        execute.assert_called_once()
+
 
 class NetworkTests(unittest.TestCase):
     @patch("kiosk.time.sleep")
@@ -201,6 +215,8 @@ class LoginPageTests(unittest.TestCase):
         for outcome in (
             403, 404, 204, 503, self.error(403), self.error(404), self.error(302),
             urllib.error.URLError("refused"), ssl.SSLError("reset"), TimeoutError(),
+            http.client.BadStatusLine("junk"), http.client.IncompleteRead(b""),
+            http.client.InvalidURL("bad"),
         ):
             with self.subTest(outcome=repr(outcome)):
                 result, requested = self.probe(outcome, outcome)
@@ -212,6 +228,21 @@ class LoginPageTests(unittest.TestCase):
         result, requested = self.probe(self.error(301, SITE), refused, refused)
         self.assertEqual(result, Probe("blocked"))
         self.assertEqual(requested, [PLAIN, SITE, SITE])
+
+    def test_probe_records_what_the_network_did_without_paths_or_tokens(self):
+        reset = urllib.error.URLError(ConnectionResetError())
+        result, _ = self.probe(self.error(301, SITE), reset, reset)
+        self.assertEqual(
+            result.detail,
+            "http://example.com answered 301 redirecting to example.com; "
+            "https://example.com failed (ConnectionResetError); "
+            "https://example.com failed (ConnectionResetError)",
+        )
+        portal = "https://portal.example.net:6082/php/uid.php?token=abc"
+        result, _ = self.probe(self.error(302, portal))
+        self.assertEqual(result.detail, "http://example.com answered 302 redirecting to portal.example.net")
+        self.assertNotIn("token", result.detail)
+        self.assertNotIn("uid.php", result.detail)
 
     def test_the_real_kiosk_url_decides_not_the_probe_address(self):
         url = SITE + "?view=1"

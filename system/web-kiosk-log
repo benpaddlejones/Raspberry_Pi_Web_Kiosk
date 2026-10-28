@@ -1,0 +1,23 @@
+#!/bin/bash
+# Copies recent kiosk logs to the readable boot partition; the image has no admin login.
+set -uo pipefail
+
+out=/boot/firmware/kiosk-log.txt
+tmp="$(mktemp /run/web-kiosk-log.XXXXXX)"
+trap 'rm -f "$tmp"' EXIT
+
+{
+    date '+%Y-%m-%d %H:%M:%S %Z'
+    uptime -p
+    if command -v vcgencmd >/dev/null 2>&1; then
+        printf 'power/throttling (0x0 is healthy): '
+        vcgencmd get_throttled
+    fi
+    printf '\n--- kiosk session, sign-in and network setup (this boot)\n'
+    journalctl -b --no-pager -o short-iso \
+        -t web-kiosk -t web-kiosk-portal -t web-kiosk-wifi -t web-kiosk-network-setup | tail -n 200
+    printf '\n--- warnings and errors (this boot)\n'
+    journalctl -b --no-pager -o short-iso -p warning | tail -n 100
+} > "$tmp" 2>&1
+
+cat "$tmp" > "$out"
