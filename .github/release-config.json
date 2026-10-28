@@ -17,8 +17,8 @@
       "Daily updates from the official stable OS and security repositories"
     ],
     "compatibility": [
-      "Targets Raspberry Pi 4, Pi 400, Pi 5 and Pi 500 (64-bit)",
-      "HDMI display, 2 GB RAM minimum recommended, 16 GB or larger boot media"
+      "Targets Raspberry Pi 3B+, 4, 400, 5 and 500 (64-bit)",
+      "HDMI display, 16 GB or larger boot media; 2 GB RAM or more recommended (the Pi 3B+ has 1 GB)"
     ],
     "known_issues": [
       "Physical Raspberry Pi boot, HDMI and browser validation is still required",

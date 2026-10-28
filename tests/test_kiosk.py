@@ -287,10 +287,12 @@ class LoginPageTests(unittest.TestCase):
         self.assertEqual(pause.call_count, 2)
 
     @patch("kiosk.time.sleep")
-    @patch("kiosk.probe_network", return_value=Probe("blocked"))
+    @patch("kiosk.probe_network", return_value=Probe("blocked", detail="http://example.com answered 403"))
     def test_does_not_wait_for_a_blocked_site_unless_a_portal_is_configured(self, probe, pause):
-        wait_for_login_page(SITE)
+        with contextlib.redirect_stderr(io.StringIO()) as log:
+            wait_for_login_page(SITE)
         pause.assert_not_called()
+        self.assertEqual(log.getvalue(), "Network check: blocked (http://example.com answered 403)\n")
 
     @patch("kiosk.time.sleep")
     @patch("kiosk.probe_network", side_effect=[Probe("blocked"), Probe("blocked"), Probe("open")])

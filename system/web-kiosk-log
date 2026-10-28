@@ -2,9 +2,17 @@
 # Copies recent kiosk logs to the readable boot partition; the image has no admin login.
 set -uo pipefail
 
-out=/boot/firmware/kiosk-log.txt
-tmp="$(mktemp /run/web-kiosk-log.XXXXXX)"
+out="${KIOSK_LOG_FILE:-/boot/firmware/kiosk-log.txt}"
+tmp="$(mktemp "${TMPDIR:-/tmp}/web-kiosk-log.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
+
+# Anyone holding the card can read the boot partition, so cap line length and mask MAC addresses and secrets.
+tidy() {
+    cut -c1-500 | sed -E \
+        -e 's/([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/xx:xx:xx:xx:xx:xx/g' \
+        -e 's/(password|passwd|psk|secret|token|identity)=[^ ]*/\1=***/Ig' \
+        -e 's#(https?://[^ ?"]+)\?[^ "]*#\1?***#g'
+}
 
 {
     date '+%Y-%m-%d %H:%M:%S %Z'
@@ -15,9 +23,9 @@ trap 'rm -f "$tmp"' EXIT
     fi
     printf '\n--- kiosk session, sign-in and network setup (this boot)\n'
     journalctl -b --no-pager -o short-iso \
-        -t web-kiosk -t web-kiosk-portal -t web-kiosk-wifi -t web-kiosk-network-setup | tail -n 200
+        -t web-kiosk -t web-kiosk-portal -t web-kiosk-wifi -t web-kiosk-network-setup | tail -n 200 | tidy
     printf '\n--- warnings and errors (this boot)\n'
-    journalctl -b --no-pager -o short-iso -p warning | tail -n 100
+    journalctl -b --no-pager -o short-iso -p warning | tail -n 100 | tidy
 } > "$tmp" 2>&1
 
 cat "$tmp" > "$out"
