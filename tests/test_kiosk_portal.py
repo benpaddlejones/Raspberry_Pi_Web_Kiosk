@@ -8,11 +8,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import kiosk_portal as portal
-from kiosk_portal import Credentials, PortalError, Probe
+from kiosk import Probe
+from kiosk_portal import Credentials, PortalError
 
 HOST = "portal.example.org"
 LOCATION = f"https://{HOST}:6082/php/uid.php?vsys=1&token=abc"
 SECRET = "S3cret-pass!&=%"
+SITE = "https://tempehs.example.org/timetable/"
 LOGIN_PAGE = (
     '<input type="password" id="passwd" name="passwd">'
     '<script>var respStatus = ""; thisForm.preauthid.value = "68e5f3dc003d5965";</script>'
@@ -27,6 +29,7 @@ class PortalTestCase(unittest.TestCase):
         self.boot = Path(directory.name)
         self.config = self.boot / "kiosk-portal.txt"
         self.config.write_text(f"portal = {HOST}\n", encoding="utf-8")
+        (self.boot / "kiosk-url.txt").write_text(SITE, encoding="utf-8")
         self.state = self.boot / "state" / "portal-state.json"
 
 
@@ -81,28 +84,6 @@ class LoginPageTests(unittest.TestCase):
 
 
 class NetworkTests(unittest.TestCase):
-    def probe(self, response=None, error=None):
-        opener = MagicMock()
-        if error:
-            opener.open.side_effect = error
-        else:
-            opener.open.return_value.__enter__.return_value = MagicMock(status=response)
-        with patch("kiosk_portal.urllib.request.build_opener", return_value=opener):
-            return portal.probe_network()
-
-    def test_probe_states(self):
-        self.assertEqual(self.probe(response=204), Probe("open"))
-        self.assertEqual(self.probe(response=200), Probe("unknown"))
-        self.assertEqual(self.probe(error=urllib.error.URLError("down")), Probe("offline"))
-        redirect = urllib.error.HTTPError("http://probe", 302, "Found", {"Location": LOCATION}, None)
-        self.assertEqual(self.probe(error=redirect), Probe("portal", LOCATION))
-        relative = urllib.error.HTTPError("http://probe", 302, "Found", {"Location": "/login"}, None)
-        self.assertEqual(
-            self.probe(error=relative).location, "http://connectivitycheck.gstatic.com/login"
-        )
-        forbidden = urllib.error.HTTPError("http://probe", 403, "Forbidden", {}, None)
-        self.assertEqual(self.probe(error=forbidden), Probe("unknown"))
-
     def test_untrusted_certificate_is_reported_without_sending(self):
         opener = MagicMock()
         opener.open.side_effect = urllib.error.URLError(ssl.SSLCertVerificationError("bad"))
@@ -181,12 +162,20 @@ class CheckOnceTests(PortalTestCase):
         self.assertIn("is off", self.check())
         self.probe_network.assert_not_called()
 
-    def test_nothing_to_do_when_online_or_blocked_without_a_login_page(self):
-        for state, text in (("open", "no sign-in needed"), ("offline", "No network"), ("unknown", "did not show")):
+    def test_nothing_to_do_when_the_site_answers_and_nothing_sent_when_blocked(self):
+        for state, text in (("open", "no sign-in needed"), ("blocked", "nothing was sent")):
             with self.subTest(state=state):
                 self.probe_network.return_value = Probe(state)
                 self.assertIn(text, self.check())
+        self.probe_network.assert_called_with(SITE)
         self.fetch.assert_not_called()
+        self.read_credentials.assert_not_called()
+
+    def test_unreadable_kiosk_url_stops_before_probing(self):
+        (self.boot / "kiosk-url.txt").write_text("not a url", encoding="utf-8")
+        with self.assertRaisesRegex(PortalError, "kiosk-url.txt"):
+            self.check()
+        self.probe_network.assert_not_called()
 
     def test_credentials_are_never_sent_to_another_host(self):
         for location in (

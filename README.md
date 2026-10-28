@@ -232,10 +232,20 @@ number or path:
 portal = portal.example.org
 ```
 
-When it is on, a background service checks every 30 seconds whether the network
-is redirecting to a login page. If the page is on the host named above, it signs
-in and confirms internet access is open. It repeats this if the firewall login
-later expires. The setting is read when the Pi boots, so reboot after changing it.
+When it is on, a background service checks every 30 seconds whether your kiosk
+page answers HTTP 200 over HTTPS. If it does, you are signed in. Anything else
+counts as not signed in: a redirect to a login page, a refused or reset
+connection (such as Chromium's `ERR_HTTP2_SERVER_REFUSED_STREAM`), or any other
+status. The kiosk URL must therefore return 200 when you are signed in.
+
+To sign in it needs the login page's address, which the network supplies by
+redirecting a request for your site. Each check therefore requests the plain
+HTTP address of your site first: an unsigned network normally bounces that
+straight to its login page. If the login page is on the host named above, the Pi
+signs in and checks the kiosk page again. If the network refuses the site without
+offering a login page, nothing is sent and `kiosk-portal-status.txt` says so. It
+repeats this if the firewall login later expires. The setting is read when the Pi
+boots, so reboot after changing it.
 
 - **Where the password comes from:** the Wi-Fi connection saved on the Pi, only
 	readable by the system. Nothing is added to the boot partition. The connection
@@ -301,12 +311,12 @@ that account's privileges or files.
 - Startup waits until the configured website host's port is reachable. If the
 	network is slow or unavailable at boot, it retries every five seconds. This is
 	a startup check, not ongoing website health monitoring or proxy support.
-- If the network redirects to a web login page (for example a firewall that is
-	still identifying the device), startup waits up
-	to three minutes for the redirect to clear before opening Chromium. Detection
-	uses Google's `http://connectivitycheck.gstatic.com/generate_204`; if that is
-	unreachable, startup is not delayed. After three minutes the browser opens on
-	the login page so someone can sign in.
+- Startup checks that the kiosk page answers HTTP 200. When a portal is set in
+	`kiosk-portal.txt`, it waits up to three minutes for that while the sign-in
+	service signs in, then opens Chromium either way. With no portal set, it waits
+	only if the network redirects the site to a login page, and does not wait for a
+	site that is simply unreachable. After the wait, the browser opens even if the
+	login has not completed, so someone can sign in.
 - Closing or crashing the browser ends the session; systemd restarts login after
 	five seconds and reads the URL again. Chromium retains its browser profile and
 	website cookies under the kiosk account, so logins can persist across restarts.
@@ -345,8 +355,8 @@ The released image has no administrator login. On the image:
 	the file and reboot.
 - **Login page still shown:** if `kiosk-portal-status.txt` is missing on `bootfs`,
 	sign-in is off. Otherwise it says whether sign-in was attempted, rejected, or
-	skipped (wrong host, untrusted certificate, extra verification, or no saved
-	username and password).
+	skipped (wrong host, untrusted certificate, extra verification, no saved
+	username and password, or the site is refused and no login page was offered).
 - **Wrong website:** check `kiosk-url.txt` as described above.
 
 On an existing-OS installation, use an administrator console or SSH session to
