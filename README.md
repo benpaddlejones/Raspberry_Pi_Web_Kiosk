@@ -46,9 +46,11 @@ product release. Set `prerelease` to `false` only after hardware validation.
 
 ## Flash and Start
 
-Target hardware: Raspberry Pi 4, 400, 5 or 500, an HDMI display, a suitable power
-supply and a 16 GB or larger SD card or USB boot drive. At least 2 GB RAM is
-recommended. USB boot must already be supported and enabled on your Pi.
+Target hardware: Raspberry Pi 3B+ and newer (3B+, 4, 400, 5 and 500), an HDMI
+display, a suitable power supply and a 16 GB or larger SD card or USB boot drive.
+A Pi 3B+ has 1 GB RAM and an OpenGL ES 2.0-only GPU, so heavy pages run slower
+there; 2 GB or more is recommended. USB boot must already be supported and
+enabled on your Pi.
 
 1. Verify the downloaded archive against its SHA-256 checksum. The release also
 	 includes verification instructions for Windows, macOS and Linux.
@@ -355,11 +357,14 @@ sudo poweroff
 The released image has no administrator login. On the image:
 
 - **Crashes, restarts or a blank screen:** shut the Pi down cleanly and open
-	`kiosk-log.txt` on `bootfs`. It is refreshed about every 90 seconds and shows
-	the kiosk session, sign-in and network setup messages and recent warnings from
-	this boot, plus the power status (`throttled=0x0` is healthy; anything else
-	means under-voltage or overheating). It contains network names and device
-	details but never passwords. Share it when asking for help.
+	`kiosk-log.txt` on `bootfs`. It is rewritten from scratch about every 90 seconds
+	and at each boot, so it never grows and only describes the current boot (the
+	previous boot's log is lost about 45 seconds into the next). It holds at most
+	300 lines of the kiosk session, sign-in and network setup messages and recent
+	warnings, plus the power status (`throttled=0x0` is healthy; anything else
+	means under-voltage or overheating). Passwords and tokens are never logged, and
+	MAC addresses and URL query strings are masked, but it can contain network
+	names and host names. Share it when asking for help.
 - **No network:** create `kiosk-network-setup.txt` on `bootfs`, connect a keyboard
 	and reboot to use the on-screen setup.
 - **`kiosk-wifi.txt` not applied:** read `kiosk-wifi-error.txt` on `bootfs`, fix
