@@ -51,6 +51,11 @@ if [[ -e /boot/firmware/kiosk-wifi.txt ]]; then
 else
     python3 "$project_root/kiosk_wifi.py" --config "$project_root/kiosk-wifi.txt" --check
 fi
+if [[ -e /boot/firmware/kiosk-portal.txt ]]; then
+    python3 "$project_root/kiosk_portal.py" --config /boot/firmware/kiosk-portal.txt --check
+else
+    python3 "$project_root/kiosk_portal.py" --config "$project_root/kiosk-portal.txt" --check
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -74,6 +79,9 @@ install -m 0755 "$project_root/kiosk_wifi_setup.py" \
     /usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi_setup.py
 install -m 0644 "$project_root/system/web-kiosk-wifi.service" \
     /etc/systemd/system/web-kiosk-wifi.service
+install -m 0755 "$project_root/kiosk_portal.py" /usr/local/lib/raspberry-pi-web-kiosk/kiosk_portal.py
+install -m 0644 "$project_root/system/web-kiosk-portal.service" \
+    /etc/systemd/system/web-kiosk-portal.service
 install -D -m 0644 "$project_root/THIRD_PARTY_NOTICES.md" \
     /usr/share/doc/raspberry-pi-web-kiosk/THIRD_PARTY_NOTICES.md
 install -m 0755 "$project_root/system/web-kiosk-session" /usr/local/bin/web-kiosk-session
@@ -97,10 +105,14 @@ fi
 if [[ ! -e /boot/firmware/kiosk-wifi.txt ]]; then
     install -m 0644 "$project_root/kiosk-wifi.txt" /boot/firmware/kiosk-wifi.txt
 fi
+if [[ ! -e /boot/firmware/kiosk-portal.txt ]]; then
+    install -m 0644 "$project_root/kiosk-portal.txt" /boot/firmware/kiosk-portal.txt
+fi
 
 systemctl set-default multi-user.target
 systemctl enable getty@tty1.service NetworkManager-wait-online.service systemd-timesyncd.service \
-    web-kiosk-wifi.service web-kiosk-network-setup.service apt-daily.timer apt-daily-upgrade.timer
+    web-kiosk-wifi.service web-kiosk-portal.service web-kiosk-network-setup.service \
+    apt-daily.timer apt-daily-upgrade.timer
 if ! "$image_build"; then
     systemctl daemon-reload
 fi

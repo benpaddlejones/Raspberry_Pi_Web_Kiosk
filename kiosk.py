@@ -79,13 +79,13 @@ def wait_for_network(url: str) -> None:
             time.sleep(5)
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
+class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *arguments, **keywords):
         return None
 
 
 def behind_login_page() -> bool:
-    opener = urllib.request.build_opener(_NoRedirect)
+    opener = urllib.request.build_opener(NoRedirect)
     try:
         with opener.open(PORTAL_PROBE, timeout=10) as response:
             return response.status != 204

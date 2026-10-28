@@ -192,8 +192,8 @@ def activate(ssid: str) -> tuple[bool, str]:
         if connectivity == "portal":
             return True, (
                 f"Connected to '{ssid}', but the network requires a web login. "
-                "The kiosk will show the login page; ask your IT team about an exemption "
-                "for unattended displays."
+                "The Pi signs in automatically if kiosk-portal.txt names the login page; "
+                "otherwise the kiosk shows the login page."
             )
         return True, f"Connected to '{ssid}'. Settings are saved permanently."
 

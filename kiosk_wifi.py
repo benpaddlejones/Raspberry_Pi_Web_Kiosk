@@ -276,7 +276,7 @@ def build_connection(values: dict[str, str], boot_dir: Path, cert_dir: Path = CE
     return Connection(_render(sections), files, warnings)
 
 
-def _write_private(path: Path, data: bytes) -> None:
+def write_private(path: Path, data: bytes) -> None:
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".kiosk-wifi-")
     try:
         with os.fdopen(descriptor, "wb") as file:
@@ -310,9 +310,9 @@ def save_connection(connection: Connection, connection_dir: Path = CONNECTION_DI
                     cert_dir: Path = CERT_DIR) -> None:
     cert_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     for source, destination in connection.files:
-        _write_private(destination, source.read_bytes())
+        write_private(destination, source.read_bytes())
     keyfile = connection_dir / f"{CONNECTION_ID}.nmconnection"
-    _write_private(keyfile, connection.keyfile.encode())
+    write_private(keyfile, connection.keyfile.encode())
 
     result = subprocess.run(
         ["nmcli", "connection", "load", str(keyfile)],

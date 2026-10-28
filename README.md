@@ -218,6 +218,53 @@ Shut down the Pi and move the boot drive to another computer, then either:
 - create a new `kiosk-wifi.txt`. It replaces the connection previously saved from
 	this file. A connection added on screen is kept alongside it.
 
+### Network Login Page
+
+Some networks, such as school and enterprise firewalls, show a web login page
+before allowing internet access. The Pi can sign in to it automatically with the
+username and password of the saved Wi-Fi connection. It is **off by default**.
+To turn it on, edit `kiosk-portal.txt` on `bootfs`: remove the `#` from the
+`portal` line and set it to the host name of your network's login page. The host
+name is shown in the browser's address bar on the login page, without the port
+number or path:
+
+```text
+portal = portal.example.org
+```
+
+When it is on, a background service checks every 30 seconds whether the network
+is redirecting to a login page. If the page is on the host named above, it signs
+in and confirms internet access is open. It repeats this if the firewall login
+later expires. The setting is read when the Pi boots, so reboot after changing it.
+
+- **Where the password comes from:** the Wi-Fi connection saved on the Pi, only
+	readable by the system. Nothing is added to the boot partition. The connection
+	must use a username and password, with the password stored for all users
+	(the on-screen setup does this).
+- **Only the named host is trusted:** credentials are sent only to that exact
+	host, over HTTPS with a valid certificate. A login page anywhere else, over
+	HTTP, or with a certificate that is not trusted is ignored.
+- **Account lock-out protection:** after a sign-in that is not accepted it waits
+	15 minutes before trying again. After three failures with the same credentials
+	it tries only once a day until the Wi-Fi password is changed.
+- **Not supported:** login pages asking for extra verification, such as a second
+	step or one-time code.
+- **No passwords in logs:** results appear in `kiosk-portal-status.txt` on `bootfs`
+	and in the system log (`journalctl -t web-kiosk-portal`).
+
+To turn it off again, put a `#` at the start of the `portal` line, or leave the
+value blank. Signing in automatically means all of the kiosk's internet use is
+logged against that account, so confirm with your IT team that this is allowed.
+An exemption or a dedicated kiosk account from IT is the cleaner alternative.
+
+While it is off, the sign-in service does not start at all, and an old
+`kiosk-portal-status.txt` is removed. The kiosk still waits for the login page to
+clear (see Operation and Updates); it does not sign in.
+
+The kiosk waits up to three minutes at startup for the login to complete. If it
+succeeds later, the open page does not reload by itself; restart the kiosk or
+reboot.
+
 ## Install on Existing Raspberry Pi OS
 
 Start with an updated **Raspberry Pi OS Lite (64-bit), Trixie** installation and
@@ -236,9 +283,12 @@ sudo reboot
 
 The installer updates the OS, installs the kiosk packages, creates a separate
 unprivileged account, and configures automatic login on the first console. It
-also installs the Wi-Fi settings file and on-screen setup. It preserves existing
-`kiosk-url.txt` and `kiosk-wifi.txt` files and does not change your administrator,
-locale or timezone, but it does switch time sync to Google's servers. It deliberately switches the device to a
+also installs the Wi-Fi settings file, on-screen setup and network login page
+sign-in (off until you set a portal; see
+[Network Login Page](#network-login-page)). It preserves existing
+`kiosk-url.txt`, `kiosk-wifi.txt` and `kiosk-portal.txt` files and does not change
+your administrator, locale or timezone, but it does switch time sync to Google's
+servers. It deliberately switches the device to a
 dedicated kiosk boot session, so use a Pi dedicated to this purpose. An existing
 unmanaged account called `kiosk` causes installation to stop instead of changing
 that account's privileges or files.
@@ -251,8 +301,8 @@ that account's privileges or files.
 - Startup waits until the configured website host's port is reachable. If the
 	network is slow or unavailable at boot, it retries every five seconds. This is
 	a startup check, not ongoing website health monitoring or proxy support.
-- If the network redirects to a web login page (for example the NSW DoE edge
-	portal while the firewall is still identifying the device), startup waits up
+- If the network redirects to a web login page (for example a firewall that is
+	still identifying the device), startup waits up
 	to three minutes for the redirect to clear before opening Chromium. Detection
 	uses Google's `http://connectivitycheck.gstatic.com/generate_204`; if that is
 	unreachable, startup is not delayed. After three minutes the browser opens on
@@ -293,6 +343,10 @@ The released image has no administrator login. On the image:
 	and reboot to use the on-screen setup.
 - **`kiosk-wifi.txt` not applied:** read `kiosk-wifi-error.txt` on `bootfs`, fix
 	the file and reboot.
+- **Login page still shown:** if `kiosk-portal-status.txt` is missing on `bootfs`,
+	sign-in is off. Otherwise it says whether sign-in was attempted, rejected, or
+	skipped (wrong host, untrusted certificate, extra verification, or no saved
+	username and password).
 - **Wrong website:** check `kiosk-url.txt` as described above.
 
 On an existing-OS installation, use an administrator console or SSH session to
@@ -355,6 +409,8 @@ Before promoting a release, test on a physical target Pi:
 - a URL change made from a Windows/macOS computer;
 - the guided on-screen setup with personal and PEAP Wi-Fi, a wrong password,
 	and a network with a web login page;
+- automatic sign-in to the login page, including a wrong password and an expired
+	firewall login;
 - WPA2 Personal and Enterprise (PEAP) Wi-Fi from `kiosk-wifi.txt`;
 - delayed networking, browser restart, and an OS upgrade followed by reboot.
 
