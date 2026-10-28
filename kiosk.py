@@ -10,12 +10,13 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
+from typing import NamedTuple
+from urllib.parse import urljoin, urlsplit
 
 
 DEFAULT_CONFIG = Path("/boot/firmware/kiosk-url.txt")
-PORTAL_PROBE = "http://connectivitycheck.gstatic.com/generate_204"
 PORTAL_WAIT_SECONDS = 180
+MAX_SITE_REDIRECTS = 5
 
 
 class ConfigError(ValueError):
@@ -84,25 +85,78 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def behind_login_page() -> bool:
+class Probe(NamedTuple):
+    state: str  # open, portal or blocked
+    location: str = ""
+
+
+def probe_address(url: str) -> str:
+    """Plain-HTTP address of the kiosk site; a login portal redirects it elsewhere."""
+    address = urlsplit(url)
+    host = f"[{address.hostname}]" if ":" in address.hostname else address.hostname
+    port = f":{address.port}" if address.scheme == "http" and address.port else ""
+    return f"http://{host}{port}{address.path or '/'}"
+
+
+def _site_name(address: str) -> str:
+    return (urlsplit(address).hostname or "").lower().removeprefix("www.")
+
+
+def _request(target: str, timeout: float) -> Probe:
+    site = _site_name(target)
     opener = urllib.request.build_opener(NoRedirect)
+    for _ in range(MAX_SITE_REDIRECTS + 1):
+        try:
+            with opener.open(target, timeout=timeout) as response:
+                return Probe("open") if response.status == 200 else Probe("blocked")
+        except urllib.error.HTTPError as error:
+            location = error.headers.get("Location", "") if 300 <= error.code < 400 else ""
+            if not location:
+                return Probe("blocked")
+            try:
+                destination = urljoin(target, location)
+                same_site = _site_name(destination) == site
+            except ValueError:
+                return Probe("portal", location)
+            if not same_site:
+                return Probe("portal", destination)
+            target = destination
+        except OSError:
+            return Probe("blocked")
+    return Probe("blocked")
+
+
+def probe_network(url: str, timeout: float = 10) -> Probe:
+    """Signed in only if the kiosk page itself answers 200; anything else is not signed in."""
+    if urlsplit(url).scheme == "http":
+        return _request(url, timeout)
+    # Unsigned networks normally bounce plain HTTP straight to their login page.
+    plain = _request(probe_address(url), timeout)
+    return plain if plain.state == "portal" else _request(url, timeout)
+
+
+def portal_configured() -> bool:
+    # Imported late because kiosk_portal imports this module.
+    from kiosk_portal import DEFAULT_CONFIG as portal_config, PortalError, read_portal
+
     try:
-        with opener.open(PORTAL_PROBE, timeout=10) as response:
-            return response.status != 204
-    except urllib.error.HTTPError as error:
-        return 300 <= error.code < 400
-    except OSError:
-        # Probe unreachable (e.g. intranet-only network): don't delay the kiosk.
+        return read_portal(portal_config) is not None
+    except PortalError:
         return False
 
 
-def wait_for_login_page(limit: float = PORTAL_WAIT_SECONDS) -> None:
+def wait_for_login_page(url: str, limit: float = PORTAL_WAIT_SECONDS,
+                        until_reachable: bool = False) -> None:
+    """Wait for a network login to clear; with until_reachable, wait until the site answers 200."""
     deadline = time.monotonic() + limit
-    while behind_login_page():
-        if time.monotonic() >= deadline:
-            print("Network login page still required; opening the browser.", file=sys.stderr, flush=True)
+    while True:
+        state = probe_network(url).state
+        if state == "open" or (state == "blocked" and not until_reachable):
             return
-        print("Network login page detected; waiting for sign-in to clear.", file=sys.stderr, flush=True)
+        if time.monotonic() >= deadline:
+            print("Network login still required; opening the browser.", file=sys.stderr, flush=True)
+            return
+        print("Waiting for the network login to complete.", file=sys.stderr, flush=True)
         time.sleep(5)
 
 
@@ -126,7 +180,7 @@ def main(arguments: list[str] | None = None) -> int:
             raise ConfigError("Chromium is not installed.")
 
         wait_for_network(url)
-        wait_for_login_page()
+        wait_for_login_page(url, until_reachable=portal_configured())
         profile = Path.home() / ".local/share/raspberry-pi-web-kiosk/chromium"
         profile.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.execv(browser, browser_command(browser, url, profile))

@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
-from kiosk import PORTAL_PROBE, NoRedirect
+from kiosk import ConfigError, NoRedirect, probe_network, read_url
 from kiosk_wifi import write_private
 
 
@@ -49,11 +49,6 @@ class Credentials(NamedTuple):
     password: str
 
 
-class Probe(NamedTuple):
-    state: str  # open, portal, unknown or offline
-    location: str = ""
-
-
 def read_portal(path: Path = DEFAULT_CONFIG) -> str | None:
     try:
         content = path.read_text(encoding="utf-8-sig")
@@ -77,20 +72,6 @@ def read_portal(path: Path = DEFAULT_CONFIG) -> str | None:
     if len(hosts) != 1 or not HOST_PATTERN.fullmatch(hosts[0]):
         raise PortalError("'portal' must be one host name such as portal.example.org.")
     return hosts[0]
-
-
-def probe_network() -> Probe:
-    opener = urllib.request.build_opener(NoRedirect)
-    try:
-        with opener.open(PORTAL_PROBE, timeout=REQUEST_TIMEOUT) as response:
-            return Probe("open" if response.status == 204 else "unknown")
-    except urllib.error.HTTPError as error:
-        location = error.headers.get("Location", "") if 300 <= error.code < 400 else ""
-        if location:
-            return Probe("portal", urllib.parse.urljoin(PORTAL_PROBE, location))
-        return Probe("unknown")
-    except OSError:
-        return Probe("offline")
 
 
 def _nmcli(*arguments: str) -> str:
@@ -223,17 +204,22 @@ def check_once(config: Path = DEFAULT_CONFIG, state_path: Path = STATE_FILE,
     host = read_portal(config)
     if host is None:
         return "Portal sign-in is off: no 'portal' is set in kiosk-portal.txt."
+    try:
+        site = read_url(config.parent / "kiosk-url.txt")
+    except ConfigError as error:
+        raise PortalError("Cannot read the website from kiosk-url.txt.") from error
 
-    probe = probe_network()
-    if probe.state == "offline":
-        return "No network connection."
-    if probe.state == "unknown":
-        return "Internet access is blocked, but the network did not show a login page."
+    probe = probe_network(site)
+    if probe.state == "blocked":
+        return (
+            "The kiosk website is not answering and the network did not offer a login page, "
+            "so nothing was sent."
+        )
     if probe.state == "open":
         state = load_state(state_path)
         if state["failures"]:
             save_state(state_path, {**state, "failures": 0})
-        return "Internet access is open; no sign-in needed."
+        return "The kiosk website answered; no sign-in needed."
 
     try:
         address = urllib.parse.urlsplit(probe.location)
@@ -266,7 +252,7 @@ def check_once(config: Path = DEFAULT_CONFIG, state_path: Path = STATE_FILE,
     fetch(opener, probe.location, login_form(credentials, preauth_id))
     for _ in range(SIGN_IN_CHECKS):
         time.sleep(SIGN_IN_CHECK_SECONDS)
-        if probe_network().state == "open":
+        if probe_network(site).state == "open":
             save_state(state_path, {**state, "failures": 0})
             return "Signed in to the network login page."
     return retry_message(state, now) or "The sign-in was not accepted."
