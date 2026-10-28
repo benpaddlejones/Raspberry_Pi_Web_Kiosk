@@ -1,0 +1,13 @@
+# Network login page (captive portal) sign-in for the Raspberry Pi Web Kiosk.
+#
+# Some networks show a web login page before they allow internet access. When
+# the Pi is redirected to the portal named below, it signs in with the username
+# and password of the Wi-Fi connection saved on the Pi.
+#
+# The password is only ever sent to this exact host name, over HTTPS with a
+# valid certificate. A login page on any other host is ignored.
+# To turn this off, put a # at the start of the line below.
+# portal = edgeportal.<domain>
+#
+# Results are written to kiosk-portal-status.txt on this drive. It never
+# contains passwords.

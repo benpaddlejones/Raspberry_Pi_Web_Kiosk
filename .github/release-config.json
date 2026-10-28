@@ -1,5 +1,5 @@
 {
-  "version": "0.4.0",
+  "version": "0.6.0",
   "name": "Web Kiosk Preview",
   "description": "Raspberry Pi OS web kiosk with boot-partition URL configuration",
   "prerelease": true,
@@ -9,6 +9,7 @@
       "Automatic login to an unprivileged Chromium kiosk session",
       "Website configured in kiosk-url.txt on the Windows/macOS-readable boot partition",
       "Guided on-screen Wi-Fi setup at first boot (network list, password or username + password); saved permanently",
+      "Optional automatic sign-in to a network login page using the saved Wi-Fi credentials (kiosk-portal.txt)",
       "Personal and enterprise Wi-Fi (PEAP, TTLS, TLS, PWD, FAST, LEAP) configured in kiosk-wifi.txt",
       "Preset for Sydney: Australia/Sydney timezone, en_AU locale, AU Wi-Fi country, Google time servers",
       "No first-boot account setup; the administrator account is locked",

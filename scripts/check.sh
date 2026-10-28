@@ -7,6 +7,7 @@ cd "$project_root"
 python3 -B -m unittest discover -s tests -v
 python3 -B kiosk.py --config kiosk-url.txt --check
 python3 -B kiosk_wifi.py --config kiosk-wifi.txt --check
+python3 -B kiosk_portal.py --config kiosk-portal.txt --check
 python3 -B scripts/release.py metadata
 
 mapfile -d '' scripts < <(find scripts system build/stage-web-kiosk \

@@ -1,0 +1,23 @@
+[Unit]
+Description=Sign in to the network login page
+Wants=NetworkManager.service
+After=NetworkManager.service
+RequiresMountsFor=/boot/firmware
+
+[Service]
+Type=simple
+ExecCondition=/usr/bin/python3 -B /usr/local/lib/raspberry-pi-web-kiosk/kiosk_portal.py --enabled
+ExecStart=/usr/bin/python3 -B /usr/local/lib/raspberry-pi-web-kiosk/kiosk_portal.py
+Restart=always
+RestartSec=30
+SyslogIdentifier=web-kiosk-portal
+StateDirectory=raspberry-pi-web-kiosk
+ReadWritePaths=/boot/firmware
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
