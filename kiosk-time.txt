@@ -1,0 +1,16 @@
+# Use one NTP hostname or IP address per line, then reboot.
+# Blank or missing file restores the Microsoft default.
+# Select ONE provider group; do not mix Google's leap-smearing time with others.
+
+time.windows.com
+
+# To use Apple instead, replace the active lines above with:
+# time.apple.com
+
+# To use Google instead, replace the active lines above with:
+# time1.google.com
+# time2.google.com
+# time3.google.com
+# time4.google.com
+
+# On a restricted network, use the NTP server supplied by your network administrator.

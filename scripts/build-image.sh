@@ -76,6 +76,7 @@ install -d "$payload/scripts" "$payload/build/stage-web-kiosk/00-install"
 cp "$project_root/kiosk.py" "$project_root/kiosk-url.txt" \
     "$project_root/kiosk_wifi.py" "$project_root/kiosk_wifi_setup.py" "$project_root/kiosk-wifi.txt" \
     "$project_root/kiosk_portal.py" "$project_root/kiosk-portal.txt" \
+    "$project_root/kiosk_time.py" "$project_root/kiosk-time.txt" \
     "$project_root/THIRD_PARTY_NOTICES.md" "$payload/"
 cp "$project_root/scripts/install-kiosk.sh" "$payload/scripts/"
 cp -a "$project_root/system" "$payload/system"

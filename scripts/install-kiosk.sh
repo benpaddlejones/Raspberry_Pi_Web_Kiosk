@@ -56,6 +56,11 @@ if [[ -e /boot/firmware/kiosk-portal.txt ]]; then
 else
     python3 "$project_root/kiosk_portal.py" --config "$project_root/kiosk-portal.txt" --check
 fi
+if [[ -e /boot/firmware/kiosk-time.txt ]]; then
+    python3 "$project_root/kiosk_time.py" --config /boot/firmware/kiosk-time.txt --check
+else
+    python3 "$project_root/kiosk_time.py" --config "$project_root/kiosk-time.txt" --check
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -82,6 +87,9 @@ install -m 0644 "$project_root/system/web-kiosk-wifi.service" \
 install -m 0755 "$project_root/kiosk_portal.py" /usr/local/lib/raspberry-pi-web-kiosk/kiosk_portal.py
 install -m 0644 "$project_root/system/web-kiosk-portal.service" \
     /etc/systemd/system/web-kiosk-portal.service
+install -m 0755 "$project_root/kiosk_time.py" /usr/local/lib/raspberry-pi-web-kiosk/kiosk_time.py
+install -m 0644 "$project_root/system/web-kiosk-time.service" \
+    /etc/systemd/system/web-kiosk-time.service
 install -D -m 0644 "$project_root/THIRD_PARTY_NOTICES.md" \
     /usr/share/doc/raspberry-pi-web-kiosk/THIRD_PARTY_NOTICES.md
 install -m 0755 "$project_root/system/web-kiosk-session" /usr/local/bin/web-kiosk-session
@@ -98,7 +106,7 @@ install -D -m 0644 "$project_root/system/getty-autologin.conf" \
     /etc/systemd/system/getty@tty1.service.d/zz-web-kiosk.conf
 install -D -m 0644 "$project_root/system/chromium-policy.json" \
     /etc/chromium/policies/managed/web-kiosk.json
-install -D -m 0644 "$project_root/system/timesyncd-google.conf" \
+install -D -m 0644 "$project_root/system/timesyncd.conf" \
     /etc/systemd/timesyncd.conf.d/zz-web-kiosk.conf
 install -m 0644 "$project_root/system/20auto-upgrades" /etc/apt/apt.conf.d/20auto-upgrades
 install -m 0644 "$project_root/system/52web-kiosk-unattended-upgrades" \
@@ -113,10 +121,13 @@ fi
 if [[ ! -e /boot/firmware/kiosk-portal.txt ]]; then
     install -m 0644 "$project_root/kiosk-portal.txt" /boot/firmware/kiosk-portal.txt
 fi
+if [[ ! -e /boot/firmware/kiosk-time.txt ]]; then
+    install -m 0644 "$project_root/kiosk-time.txt" /boot/firmware/kiosk-time.txt
+fi
 
 systemctl set-default multi-user.target
 systemctl enable getty@tty1.service NetworkManager-wait-online.service systemd-timesyncd.service \
-    web-kiosk-wifi.service web-kiosk-portal.service web-kiosk-network-setup.service \
+    web-kiosk-wifi.service web-kiosk-portal.service web-kiosk-time.service web-kiosk-network-setup.service \
     web-kiosk-log.timer apt-daily.timer apt-daily-upgrade.timer
 if ! "$image_build"; then
     systemctl daemon-reload

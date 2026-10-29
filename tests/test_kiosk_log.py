@@ -43,6 +43,7 @@ class KioskLogTests(unittest.TestCase):
             "NetworkManager-wait-online.service", "systemd-timesyncd.service",
         ):
             self.assertIn(service, arguments)
+        self.assertIn("web-kiosk-time", arguments)
 
     def test_secrets_and_device_identifiers_are_masked(self):
         text = self.run_log(

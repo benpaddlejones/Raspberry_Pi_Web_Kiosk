@@ -83,7 +83,7 @@ enabled on your Pi.
 | Locale | `en_AU.UTF-8` |
 | Keyboard | US layout (standard for Australian keyboards) |
 | Wi-Fi country | `AU` |
-| Time servers | Google: `time1`-`time4.google.com`, fallback `time.google.com` |
+| Time servers | Microsoft: `time.windows.com`; configurable in `kiosk-time.txt` |
 | Kiosk account | `kiosk`: unprivileged, locked password, automatic login |
 | Administrator | `kioskadmin`: password locked, no login |
 | SSH | Disabled |
@@ -92,11 +92,31 @@ To build for another region, change `TIMEZONE_DEFAULT`, `LOCALE_DEFAULT`,
 `KEYBOARD_KEYMAP`, `KEYBOARD_LAYOUT` and `WPA_COUNTRY` in
 [build/config](build/config).
 
-The clock is set by `systemd-timesyncd` from Google Public NTP, configured in
-[system/timesyncd-google.conf](system/timesyncd-google.conf). Google smears leap
-seconds, so the file uses only Google servers. Networks that block outbound NTP
-(UDP port 123) prevent time sync, and HTTPS sites may then fail with certificate
-errors.
+The clock is set by `systemd-timesyncd`, using Microsoft `time.windows.com` by default.
+To change servers, edit [kiosk-time.txt](kiosk-time.txt) on the readable `bootfs`
+partition from Windows or another computer, then safely eject and reboot the Pi.
+Use one hostname or IP address per line, without `https://`, ports or Windows
+flags such as `,0x9`. Blank lines and `#` comments are allowed. A blank or missing
+file restores the Microsoft default. Settings are applied before time sync starts
+on each boot; installation preserves an existing file.
+
+The default file uses:
+
+```text
+time.windows.com
+```
+
+Or use `time.apple.com` for Apple, or your network administrator's local NTP
+server. Google smears leap seconds, so do not mix Google with Apple, Microsoft
+or other providers in the active list. Multiple servers provide failover, not
+load balancing. The template includes all three provider choices as examples.
+Invalid settings are reported in `kiosk-log.txt` and leave the installed Microsoft
+default in effect. The default configuration is in
+[system/timesyncd.conf](system/timesyncd.conf).
+
+Networks that block outbound NTP (UDP port 123) prevent public time sync, and
+HTTPS sites may then fail with certificate errors. Switching providers does
+not bypass such a block; use an allowed local NTP server instead.
 
 The administrator password is a random value generated during each build and
 then removed, so nobody can log in with it and there is no shared default
@@ -301,9 +321,9 @@ unprivileged account, and configures automatic login on the first console. It
 also installs the Wi-Fi settings file, on-screen setup and network login page
 sign-in (off until you set a portal; see
 [Network Login Page](#network-login-page)). It preserves existing
-`kiosk-url.txt`, `kiosk-wifi.txt` and `kiosk-portal.txt` files and does not change
-your administrator, locale or timezone, but it does switch time sync to Google's
-servers. It deliberately switches the device to a
+`kiosk-url.txt`, `kiosk-wifi.txt`, `kiosk-portal.txt` and `kiosk-time.txt` files and
+does not change your administrator, locale or timezone. Time sync uses Microsoft
+by default, or your servers configured in `kiosk-time.txt`. It deliberately switches the device to a
 dedicated kiosk boot session, so use a Pi dedicated to this purpose. An existing
 unmanaged account called `kiosk` causes installation to stop instead of changing
 that account's privileges or files.

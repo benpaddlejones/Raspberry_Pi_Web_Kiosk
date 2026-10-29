@@ -1,0 +1,15 @@
+[Unit]
+Description=Configure time servers from the boot partition
+DefaultDependencies=no
+RequiresMountsFor=/boot/firmware
+After=local-fs.target
+Before=systemd-timesyncd.service sysinit.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/raspberry-pi-web-kiosk/kiosk_time.py
+SyslogIdentifier=web-kiosk-time
+
+[Install]
+WantedBy=sysinit.target

@@ -26,7 +26,7 @@ tidy() {
     printf '\n--- kiosk session, sign-in and network setup (this boot)\n'
     {
         journalctl -b --no-pager -o short-iso \
-            -t web-kiosk -t web-kiosk-portal -t web-kiosk-wifi -t web-kiosk-network-setup
+            -t web-kiosk -t web-kiosk-portal -t web-kiosk-wifi -t web-kiosk-network-setup -t web-kiosk-time
         printf '\n--- login and network/time services (this boot)\n'
         journalctl -b --no-pager -o short-iso \
             -u getty@tty1.service -u systemd-logind.service \

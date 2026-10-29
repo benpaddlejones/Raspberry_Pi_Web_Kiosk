@@ -67,8 +67,13 @@ python3 -B "$rootfs/usr/local/lib/raspberry-pi-web-kiosk/kiosk_portal.py" \
     || fail 'The network setup screen is not installed.'
 [[ "$(readlink "$rootfs/etc/localtime")" == */Australia/Sydney ]] \
     || fail 'The timezone is not Australia/Sydney.'
-grep -q '^NTP=time1.google.com' "$rootfs/etc/systemd/timesyncd.conf.d/zz-web-kiosk.conf" \
-    || fail 'Google time servers are not configured.'
+grep -qx 'NTP=time.windows.com' "$rootfs/etc/systemd/timesyncd.conf.d/zz-web-kiosk.conf" \
+    || fail 'The Microsoft time server default is not configured.'
+[[ -f "$mount_dir/boot/kiosk-time.txt" ]] || fail 'The time server settings are missing.'
+python3 -B "$rootfs/usr/local/lib/raspberry-pi-web-kiosk/kiosk_time.py" \
+    --config "$mount_dir/boot/kiosk-time.txt" --check
+[[ -L "$rootfs/etc/systemd/system/sysinit.target.wants/web-kiosk-time.service" ]] \
+    || fail 'Time server configuration is not enabled.'
 awk -F: '$1 == "kioskadmin" { locked = ($2 ~ /^[!*]/) } END { exit !locked }' \
     "$rootfs/etc/shadow" || fail 'The administrator account is not locked.'
 [[ -x "$rootfs/usr/bin/chromium" && -x "$rootfs/usr/bin/cage" ]] \
