@@ -167,7 +167,7 @@ def portal_configured() -> bool:
 
 def wait_for_login_page(url: str, limit: float = PORTAL_WAIT_SECONDS,
                         until_reachable: bool = False) -> None:
-    """Wait for a network login to clear; with until_reachable, wait until the site answers 200."""
+    """Log the network check; with until_reachable, also wait until the site answers 200."""
     deadline = time.monotonic() + limit
     reported = False
     while True:
@@ -177,7 +177,7 @@ def wait_for_login_page(url: str, limit: float = PORTAL_WAIT_SECONDS,
             detail = f" ({probe.detail})" if probe.detail else ""
             print(f"Network check: {probe.state}{detail}", file=sys.stderr, flush=True)
         state = probe.state
-        if state == "open" or (state == "blocked" and not until_reachable):
+        if state == "open" or not until_reachable:
             return
         if time.monotonic() >= deadline:
             print("Network login still required; opening the browser.", file=sys.stderr, flush=True)

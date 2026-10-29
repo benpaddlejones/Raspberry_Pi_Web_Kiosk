@@ -316,14 +316,13 @@ that account's privileges or files.
 - Startup waits until the configured website host's port is reachable. If the
 	network is slow or unavailable at boot, it retries every five seconds. This is
 	a startup check, not ongoing website health monitoring or proxy support.
-- Startup checks that the kiosk page answers HTTP 200. When a portal is set in
-	`kiosk-portal.txt`, it waits up to three minutes for that while the sign-in
-	service signs in, then opens Chromium either way. With no portal set, it waits
-	only if the network redirects the site to a login page, and does not wait for a
-	site that is simply unreachable. After the wait, the browser opens even if the
-	login has not completed, so someone can sign in. The screen stays blank during
-	the wait. A failure in this check is logged and skipped; it never stops the
-	kiosk starting.
+- Startup checks whether the kiosk page answers HTTP 200 and logs the result.
+	When a portal is set in `kiosk-portal.txt`, it then waits up to three minutes
+	for that while the sign-in service signs in, and opens Chromium either way (the
+	screen stays blank during the wait). With no portal set it never waits: it opens
+	Chromium straight away, which shows whatever the network returns, such as the
+	login page or a Chromium error page, so someone with a keyboard can sign in. A
+	failure in this check is logged and skipped; it never stops the kiosk starting.
 - Closing or crashing the browser ends the session; systemd restarts login after
 	five seconds and reads the URL again. Chromium retains its browser profile and
 	website cookies under the kiosk account, so logins can persist across restarts.
@@ -364,7 +363,11 @@ The released image has no administrator login. On the image:
 	warnings, plus the power status (`throttled=0x0` is healthy; anything else
 	means under-voltage or overheating). Passwords and tokens are never logged, and
 	MAC addresses and URL query strings are masked, but it can contain network
-	names and host names. Share it when asking for help.
+	names and host names. The Pi has no battery-backed clock, so until it can reach
+	a time server (blocked while a network login is pending) its dates and times
+	are stale, often from the day the image was built. The line `clock synchronised
+	with a time server: no` at the top means the times are not real. Share it when
+	asking for help.
 - **No network:** create `kiosk-network-setup.txt` on `bootfs`, connect a keyboard
 	and reboot to use the on-screen setup.
 - **`kiosk-wifi.txt` not applied:** read `kiosk-wifi-error.txt` on `bootfs`, fix

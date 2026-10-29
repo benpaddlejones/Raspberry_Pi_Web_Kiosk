@@ -17,6 +17,8 @@ tidy() {
 {
     date '+%Y-%m-%d %H:%M:%S %Z'
     uptime -p
+    printf 'clock synchronised with a time server: %s\n' \
+        "$(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo unknown)"
     if command -v vcgencmd >/dev/null 2>&1; then
         printf 'power/throttling (0x0 is healthy): '
         vcgencmd get_throttled
