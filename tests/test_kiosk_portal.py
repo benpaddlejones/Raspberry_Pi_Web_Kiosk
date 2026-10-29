@@ -150,6 +150,7 @@ class CheckOnceTests(PortalTestCase):
         super().setUp()
         patches = {
             "probe_network": patch.object(portal, "probe_network"),
+            "clock_is_synchronized": patch.object(portal, "clock_is_synchronized", return_value=True),
             "read_credentials": patch.object(portal, "read_credentials", return_value=CREDENTIALS),
             "fetch": patch.object(portal, "fetch", return_value=(200, LOGIN_PAGE)),
             "sleep": patch.object(portal.time, "sleep"),
@@ -183,6 +184,12 @@ class CheckOnceTests(PortalTestCase):
         self.probe_network.assert_called_with(SITE)
         self.fetch.assert_not_called()
         self.read_credentials.assert_not_called()
+
+    def test_https_network_check_is_deferred_until_clock_is_synchronized(self):
+        self.clock_is_synchronized.return_value = False
+        self.assertIn("deferring HTTPS network check", self.check())
+        self.probe_network.assert_not_called()
+        self.fetch.assert_not_called()
 
     def test_unreadable_kiosk_url_stops_before_probing(self):
         (self.boot / "kiosk-url.txt").write_text("not a url", encoding="utf-8")

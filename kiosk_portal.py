@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
-from kiosk import ConfigError, NoRedirect, probe_network, read_url
+from kiosk import ConfigError, NoRedirect, clock_is_synchronized, probe_network, read_url
 from kiosk_wifi import write_private
 
 
@@ -210,6 +210,9 @@ def check_once(config: Path = DEFAULT_CONFIG, state_path: Path = STATE_FILE,
     except ConfigError as error:
         raise PortalError("Cannot read the website from kiosk-url.txt.") from error
 
+    if urllib.parse.urlsplit(site).scheme == "https" and not clock_is_synchronized():
+        return "System clock is not synchronized; deferring HTTPS network check."
+
     probe = probe_network(site)
     if probe.state == "blocked":
         detail = f" ({probe.detail})" if probe.detail else ""
@@ -232,6 +235,8 @@ def check_once(config: Path = DEFAULT_CONFIG, state_path: Path = STATE_FILE,
         raise PortalError(f"The login page is on '{shown}', not '{host}', so no credentials were sent.")
     if address.scheme != "https":
         raise PortalError("The login page is not HTTPS, so no credentials were sent.")
+    if not clock_is_synchronized():
+        return "System clock is not synchronized; deferring HTTPS sign-in."
 
     credentials = read_credentials()
     state = load_state(state_path)

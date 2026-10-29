@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import socket
+import subprocess
 import sys
 import time
 import urllib.error
@@ -80,6 +81,41 @@ def wait_for_network(url: str) -> None:
         except OSError:
             print("Website host unavailable; retrying in 5 seconds.", file=sys.stderr, flush=True)
             time.sleep(5)
+
+
+def clock_is_synchronized() -> bool:
+    try:
+        result = subprocess.run(
+            ["timedatectl", "show", "--property=NTPSynchronized", "--value"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "yes"
+
+
+def wait_for_time_sync() -> bool:
+    if clock_is_synchronized():
+        print("Clock synchronized with a time server.", file=sys.stderr, flush=True)
+        return True
+
+    print("Waiting for clock synchronization before HTTPS.", file=sys.stderr, flush=True)
+    next_report = time.monotonic() + 30
+    while True:
+        time.sleep(2)
+        if clock_is_synchronized():
+            print("Clock synchronized with a time server.", file=sys.stderr, flush=True)
+            return True
+        if time.monotonic() >= next_report:
+            print(
+                "Still waiting for clock synchronization.",
+                file=sys.stderr,
+                flush=True,
+            )
+            next_report = time.monotonic() + 30
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -178,10 +214,10 @@ def wait_for_login_page(url: str, limit: float = PORTAL_WAIT_SECONDS,
             print(f"Network check: {probe.state}{detail}", file=sys.stderr, flush=True)
         state = probe.state
         if state == "open" or not until_reachable:
-            return
+            return probe
         if time.monotonic() >= deadline:
             print("Network login still required; opening the browser.", file=sys.stderr, flush=True)
-            return
+            return probe
         print("Waiting for the network login to complete.", file=sys.stderr, flush=True)
         time.sleep(5)
 
@@ -206,10 +242,13 @@ def main(arguments: list[str] | None = None) -> int:
             raise ConfigError("Chromium is not installed.")
 
         wait_for_network(url)
+        probe = None
         try:
-            wait_for_login_page(url, until_reachable=portal_configured())
+            probe = wait_for_login_page(url, until_reachable=portal_configured())
         except Exception as error:  # The login wait is optional; it must never stop the kiosk starting.
             print(f"Skipping the network login wait: {type(error).__name__}", file=sys.stderr, flush=True)
+        if urlsplit(url).scheme == "https" and (probe is None or probe.state != "portal"):
+            wait_for_time_sync()
         profile = Path.home() / ".local/share/raspberry-pi-web-kiosk/chromium"
         profile.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.execv(browser, browser_command(browser, url, profile))

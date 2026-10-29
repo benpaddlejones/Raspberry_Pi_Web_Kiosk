@@ -9,8 +9,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from kiosk import (
-    ConfigError, DEFAULT_CONFIG, Probe, browser_command, main, portal_configured, probe_address,
-    probe_network, read_url, wait_for_login_page, wait_for_network,
+    ConfigError, DEFAULT_CONFIG, Probe, browser_command, clock_is_synchronized, main,
+    portal_configured, probe_address, probe_network, read_url, wait_for_login_page,
+    wait_for_network, wait_for_time_sync,
 )
 
 
@@ -116,9 +117,11 @@ class LauncherTests(unittest.TestCase):
     @patch("kiosk.wait_for_login_page")
     @patch("kiosk.wait_for_network")
     def test_launches_chromium_with_private_profile(self, wait, portal, configured, get_user_id, which, execute):
-        with patch("kiosk.Path.home", return_value=self.home):
+        with patch("kiosk.Path.home", return_value=self.home), \
+                patch("kiosk.wait_for_time_sync") as wait_sync:
             self.assertEqual(main(["--config", str(self.config)]), 0)
         wait.assert_called_once_with("https://example.com")
+        wait_sync.assert_called_once_with()
         portal.assert_called_once_with("https://example.com", until_reachable=True)
         profile = self.home / ".local/share/raspberry-pi-web-kiosk/chromium"
         self.assertTrue(profile.is_dir())
@@ -137,9 +140,37 @@ class LauncherTests(unittest.TestCase):
     def test_a_failing_login_wait_never_stops_the_browser(
         self, wait, portal, configured, get_user_id, which, execute
     ):
-        with patch("kiosk.Path.home", return_value=self.home):
+        with patch("kiosk.Path.home", return_value=self.home), \
+                patch("kiosk.wait_for_time_sync"):
             self.assertEqual(main(["--config", str(self.config)]), 0)
         execute.assert_called_once()
+
+    def test_captive_portal_does_not_wait_indefinitely_for_time_sync(self):
+        with patch("kiosk.os.geteuid", return_value=1000), \
+                patch("kiosk.shutil.which", return_value="/usr/bin/chromium"), \
+                patch("kiosk.wait_for_network"), \
+                patch("kiosk.wait_for_login_page", return_value=Probe("portal")), \
+                patch("kiosk.portal_configured", return_value=False), \
+                patch("kiosk.wait_for_time_sync") as wait_sync, \
+                patch("kiosk.os.execv") as execute, \
+                patch("kiosk.Path.home", return_value=self.home):
+            self.assertEqual(main(["--config", str(self.config)]), 0)
+        wait_sync.assert_not_called()
+        execute.assert_called_once()
+
+    @patch("kiosk.subprocess.run")
+    def test_clock_is_synchronized_only_when_timedatectl_says_yes(self, run):
+        run.return_value.returncode = 0
+        run.return_value.stdout = "yes\n"
+        self.assertTrue(clock_is_synchronized())
+        run.return_value.stdout = "no\n"
+        self.assertFalse(clock_is_synchronized())
+
+    @patch("kiosk.time.sleep")
+    @patch("kiosk.clock_is_synchronized", side_effect=[False, True])
+    def test_wait_for_time_sync_logs_and_returns_when_synchronized(self, synchronized, pause):
+        self.assertTrue(wait_for_time_sync())
+        pause.assert_called_once_with(2)
 
 
 class NetworkTests(unittest.TestCase):

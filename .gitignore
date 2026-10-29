@@ -6,3 +6,9 @@ deploy/
 build/work/
 *.img
 *.img.xz
+*log*
+!/system/getty-autologin.conf
+!/system/web-kiosk-log
+!/system/web-kiosk-log.service
+!/system/web-kiosk-log.timer
+!/tests/test_kiosk_log.py

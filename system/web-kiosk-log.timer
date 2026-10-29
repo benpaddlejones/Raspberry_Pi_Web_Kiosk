@@ -2,8 +2,8 @@
 Description=Refresh kiosk-log.txt on the boot partition
 
 [Timer]
-OnBootSec=45s
-OnUnitActiveSec=90s
+OnBootSec=60s
+OnUnitActiveSec=5min
 AccuracySec=5s
 
 [Install]
