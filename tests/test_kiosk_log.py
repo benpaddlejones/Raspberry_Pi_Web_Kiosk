@@ -14,7 +14,10 @@ class KioskLogTests(unittest.TestCase):
         self.root = Path(directory.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        (self.bin / "journalctl").write_text('#!/bin/sh\ncat "$FAKE_JOURNAL"\n', encoding="utf-8")
+        (self.bin / "journalctl").write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$@" >> "$FAKE_JOURNAL_ARGS"\ncat "$FAKE_JOURNAL"\n',
+            encoding="utf-8",
+        )
         (self.bin / "journalctl").chmod(0o755)
         self.journal = self.root / "journal.txt"
         self.out = self.root / "kiosk-log.txt"
@@ -27,9 +30,19 @@ class KioskLogTests(unittest.TestCase):
             "KIOSK_LOG_FILE": str(self.out),
             "TMPDIR": str(self.root),
             "FAKE_JOURNAL": str(self.journal),
+            "FAKE_JOURNAL_ARGS": str(self.root / "journal-args.txt"),
         }
         subprocess.run(["bash", str(SCRIPT)], env=env, check=True, capture_output=True)
         return self.out.read_text(encoding="utf-8")
+
+    def test_includes_services_that_can_block_or_fail_before_the_launcher(self):
+        self.run_log("session startup\n")
+        arguments = (self.root / "journal-args.txt").read_text(encoding="utf-8").splitlines()
+        for service in (
+            "getty@tty1.service", "systemd-logind.service",
+            "NetworkManager-wait-online.service", "systemd-timesyncd.service",
+        ):
+            self.assertIn(service, arguments)
 
     def test_secrets_and_device_identifiers_are_masked(self):
         text = self.run_log(

@@ -24,8 +24,14 @@ tidy() {
         vcgencmd get_throttled
     fi
     printf '\n--- kiosk session, sign-in and network setup (this boot)\n'
-    journalctl -b --no-pager -o short-iso \
-        -t web-kiosk -t web-kiosk-portal -t web-kiosk-wifi -t web-kiosk-network-setup | tail -n 200 | tidy
+    {
+        journalctl -b --no-pager -o short-iso \
+            -t web-kiosk -t web-kiosk-portal -t web-kiosk-wifi -t web-kiosk-network-setup
+        printf '\n--- login and network/time services (this boot)\n'
+        journalctl -b --no-pager -o short-iso \
+            -u getty@tty1.service -u systemd-logind.service \
+            -u NetworkManager-wait-online.service -u systemd-timesyncd.service
+    } | tail -n 200 | tidy
     printf '\n--- warnings and errors (this boot)\n'
     journalctl -b --no-pager -o short-iso -p warning | tail -n 100 | tidy
 } > "$tmp" 2>&1

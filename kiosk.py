@@ -19,6 +19,8 @@ from urllib.parse import urljoin, urlsplit
 
 DEFAULT_CONFIG = Path("/boot/firmware/kiosk-url.txt")
 PORTAL_WAIT_SECONDS = 180
+TIME_SYNC_WAIT_SECONDS = 60
+NETWORK_WAIT_SECONDS = 60
 MAX_SITE_REDIRECTS = 5
 
 
@@ -71,16 +73,21 @@ def browser_command(browser: str, url: str, profile: Path) -> list[str]:
     ]
 
 
-def wait_for_network(url: str) -> None:
+def wait_for_network(url: str, limit: float = NETWORK_WAIT_SECONDS) -> None:
     address = urlsplit(url)
     port = address.port or (443 if address.scheme == "https" else 80)
+    deadline = time.monotonic() + limit
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print("Website host wait timed out; opening the browser anyway.", file=sys.stderr, flush=True)
+            return
         try:
-            with socket.create_connection((address.hostname, port), timeout=5):
+            with socket.create_connection((address.hostname, port), timeout=min(5, remaining)):
                 return
         except OSError:
             print("Website host unavailable; retrying in 5 seconds.", file=sys.stderr, flush=True)
-            time.sleep(5)
+            time.sleep(min(5, max(0, deadline - time.monotonic())))
 
 
 def clock_is_synchronized() -> bool:
@@ -97,15 +104,24 @@ def clock_is_synchronized() -> bool:
     return result.returncode == 0 and result.stdout.strip() == "yes"
 
 
-def wait_for_time_sync() -> bool:
+def wait_for_time_sync(limit: float = TIME_SYNC_WAIT_SECONDS) -> bool:
     if clock_is_synchronized():
         print("Clock synchronized with a time server.", file=sys.stderr, flush=True)
         return True
 
     print("Waiting for clock synchronization before HTTPS.", file=sys.stderr, flush=True)
+    deadline = time.monotonic() + limit
     next_report = time.monotonic() + 30
     while True:
-        time.sleep(2)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print(
+                "Clock synchronization timed out; opening Chromium with certificate checks enabled.",
+                file=sys.stderr,
+                flush=True,
+            )
+            return False
+        time.sleep(min(2, remaining))
         if clock_is_synchronized():
             print("Clock synchronized with a time server.", file=sys.stderr, flush=True)
             return True
@@ -241,6 +257,7 @@ def main(arguments: list[str] | None = None) -> int:
         if browser is None:
             raise ConfigError("Chromium is not installed.")
 
+        print("Kiosk launcher started; checking website connectivity.", file=sys.stderr, flush=True)
         wait_for_network(url)
         probe = None
         try:
@@ -251,6 +268,7 @@ def main(arguments: list[str] | None = None) -> int:
             wait_for_time_sync()
         profile = Path.home() / ".local/share/raspberry-pi-web-kiosk/chromium"
         profile.mkdir(mode=0o700, parents=True, exist_ok=True)
+        print("Starting Chromium.", file=sys.stderr, flush=True)
         os.execv(browser, browser_command(browser, url, profile))
     except (ConfigError, OSError) as error:
         print(f"Kiosk startup failed: {error}", file=sys.stderr)

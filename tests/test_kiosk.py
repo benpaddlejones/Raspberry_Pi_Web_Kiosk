@@ -172,8 +172,40 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(wait_for_time_sync())
         pause.assert_called_once_with(2)
 
+    @patch("kiosk.time.sleep")
+    @patch("kiosk.time.monotonic", side_effect=[0, 0, 0, 2, 60])
+    @patch("kiosk.clock_is_synchronized", return_value=False)
+    def test_time_sync_timeout_does_not_leave_the_screen_blank(self, synchronized, clock, pause):
+        with contextlib.redirect_stderr(io.StringIO()) as log:
+            self.assertFalse(wait_for_time_sync())
+        pause.assert_called_once_with(2)
+        self.assertIn("Clock synchronization timed out; opening Chromium", log.getvalue())
+
+    def test_browser_launches_even_when_time_sync_times_out(self):
+        with patch("kiosk.os.geteuid", return_value=1000), \
+                patch("kiosk.shutil.which", return_value="/usr/bin/chromium"), \
+                patch("kiosk.wait_for_network"), \
+                patch("kiosk.wait_for_login_page", return_value=Probe("blocked")), \
+                patch("kiosk.portal_configured", return_value=False), \
+                patch("kiosk.wait_for_time_sync", return_value=False), \
+                patch("kiosk.os.execv") as execute, \
+                patch("kiosk.Path.home", return_value=self.home):
+            self.assertEqual(main(["--config", str(self.config)]), 0)
+        execute.assert_called_once()
+        self.assertNotIn("--ignore-certificate-errors", execute.call_args.args[1])
+
 
 class NetworkTests(unittest.TestCase):
+    @patch("kiosk.time.sleep")
+    @patch("kiosk.time.monotonic", side_effect=[0, 0, 5, 60])
+    @patch("kiosk.socket.create_connection", side_effect=OSError("network unavailable"))
+    def test_unreachable_host_does_not_block_browser_startup_forever(self, connect, clock, pause):
+        with contextlib.redirect_stderr(io.StringIO()) as log:
+            wait_for_network("https://example.com")
+        connect.assert_called_once_with(("example.com", 443), timeout=5)
+        pause.assert_called_once_with(5)
+        self.assertIn("Website host wait timed out", log.getvalue())
+
     @patch("kiosk.time.sleep")
     @patch("kiosk.socket.create_connection")
     def test_waits_for_host_to_become_reachable(self, connect, pause):

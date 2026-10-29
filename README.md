@@ -313,9 +313,13 @@ that account's privileges or files.
 - The browser runs as `kiosk`, never as root, and keeps Chromium's sandbox and TLS
 	certificate checks enabled. The kiosk account has a locked password and no
 	administrator privileges. There is no shared default administrator password.
-- Startup waits until the configured website host's port is reachable. If the
-	network is slow or unavailable at boot, it retries every five seconds. This is
-	a startup check, not ongoing website health monitoring or proxy support.
+- Startup waits up to 60 seconds for the configured website host's port to be
+	reachable, retrying every five seconds, then continues even if it is unavailable.
+	This is a startup check, not ongoing website health monitoring or proxy support.
+- Before opening an HTTPS site, startup waits up to 60 seconds for the clock to
+	synchronize (unless a network login redirect was detected). It then opens
+	Chromium either way, with certificate checks still enabled. An incorrect clock
+	can cause a visible certificate error, but cannot hold this wait forever.
 - Startup checks whether the kiosk page answers HTTP 200 and logs the result.
 	When a portal is set in `kiosk-portal.txt`, it then waits up to three minutes
 	for that while the sign-in service signs in, and opens Chromium either way (the
@@ -359,7 +363,7 @@ The released image has no administrator login. On the image:
 	`kiosk-log.txt` on `bootfs`. It is rewritten from scratch about every 90 seconds
 	and at each boot, so it never grows and only describes the current boot (the
 	previous boot's log is lost about 45 seconds into the next). It holds at most
-	300 lines of the kiosk session, sign-in and network setup messages and recent
+	300 lines of the kiosk session, login, network/time setup messages and recent
 	warnings, plus the power status (`throttled=0x0` is healthy; anything else
 	means under-voltage or overheating). Passwords and tokens are never logged, and
 	MAC addresses and URL query strings are masked, but it can contain network
