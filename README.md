@@ -350,6 +350,9 @@ that account's privileges or files.
 - Closing or crashing the browser ends the session; systemd restarts login after
 	five seconds and reads the URL again. Chromium retains its browser profile and
 	website cookies under the kiosk account, so logins can persist across restarts.
+- The mouse pointer moves to the bottom-left corner once before Chromium starts
+	in each kiosk session. It remains usable normally afterward; it is not hidden
+	or repeatedly repositioned.
 - Cage does not run a desktop screensaver or idle-blanking daemon. A monitor's
 	own sleep settings still apply.
 - Daily unattended upgrades install stable and security updates from the Debian

@@ -1,4 +1,5 @@
 cage
+wlrctl
 chromium
 dbus-user-session
 libgl1-mesa-dri

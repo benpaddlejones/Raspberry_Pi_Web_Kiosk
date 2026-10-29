@@ -238,6 +238,18 @@ def wait_for_login_page(url: str, limit: float = PORTAL_WAIT_SECONDS,
         time.sleep(5)
 
 
+def move_pointer_to_bottom_left() -> None:
+    try:
+        subprocess.run(
+            ["/usr/bin/wlrctl", "pointer", "move", "-100000", "100000"],
+            capture_output=True,
+            timeout=2,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f"Skipping initial pointer move: {type(error).__name__}", file=sys.stderr, flush=True)
+
+
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -268,6 +280,7 @@ def main(arguments: list[str] | None = None) -> int:
             wait_for_time_sync()
         profile = Path.home() / ".local/share/raspberry-pi-web-kiosk/chromium"
         profile.mkdir(mode=0o700, parents=True, exist_ok=True)
+        move_pointer_to_bottom_left()
         print("Starting Chromium.", file=sys.stderr, flush=True)
         os.execv(browser, browser_command(browser, url, profile))
     except (ConfigError, OSError) as error:

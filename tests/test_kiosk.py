@@ -2,6 +2,7 @@ import contextlib
 import http.client
 import io
 import ssl
+import subprocess
 import tempfile
 import unittest
 import urllib.error
@@ -10,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from kiosk import (
     ConfigError, DEFAULT_CONFIG, Probe, browser_command, clock_is_synchronized, main,
-    portal_configured, probe_address, probe_network, read_url, wait_for_login_page,
+    move_pointer_to_bottom_left, portal_configured, probe_address, probe_network, read_url, wait_for_login_page,
     wait_for_network, wait_for_time_sync,
 )
 
@@ -78,6 +79,7 @@ class LauncherTests(unittest.TestCase):
         self.home = Path(self.directory.name)
         self.config = self.home / "kiosk-url.txt"
         self.config.write_text("https://example.com", encoding="utf-8")
+        self.move_pointer = self.enterContext(patch("kiosk.move_pointer_to_bottom_left"))
         self.enterContext(contextlib.redirect_stderr(io.StringIO()))
         self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
@@ -96,6 +98,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(main(["--config", str(self.config), "--check"]), 0)
         execute.assert_not_called()
         wait.assert_not_called()
+        self.move_pointer.assert_not_called()
 
     @patch("kiosk.os.execv")
     @patch("kiosk.os.geteuid", return_value=0)
@@ -126,6 +129,7 @@ class LauncherTests(unittest.TestCase):
         profile = self.home / ".local/share/raspberry-pi-web-kiosk/chromium"
         self.assertTrue(profile.is_dir())
         self.assertEqual(profile.stat().st_mode & 0o777, 0o700)
+        self.move_pointer.assert_called_once_with()
         execute.assert_called_once_with(
             "/usr/bin/chromium",
             browser_command("/usr/bin/chromium", "https://example.com", profile),
@@ -193,6 +197,28 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(main(["--config", str(self.config)]), 0)
         execute.assert_called_once()
         self.assertNotIn("--ignore-certificate-errors", execute.call_args.args[1])
+
+
+class PointerTests(unittest.TestCase):
+    @patch("kiosk.subprocess.run")
+    def test_moves_left_and_down_once_without_a_background_process(self, run):
+        move_pointer_to_bottom_left()
+        run.assert_called_once_with(
+            ["/usr/bin/wlrctl", "pointer", "move", "-100000", "100000"],
+            capture_output=True, timeout=2, check=True,
+        )
+
+    def test_missing_failed_or_stalled_pointer_tool_does_not_stop_startup(self):
+        for error in (
+            FileNotFoundError(), subprocess.CalledProcessError(1, "wlrctl"),
+            subprocess.TimeoutExpired("wlrctl", 2),
+        ):
+            with self.subTest(error=type(error).__name__), \
+                    patch("kiosk.subprocess.run", side_effect=error) as run, \
+                    contextlib.redirect_stderr(io.StringIO()) as log:
+                move_pointer_to_bottom_left()
+                run.assert_called_once()
+                self.assertIn("Skipping initial pointer move", log.getvalue())
 
 
 class NetworkTests(unittest.TestCase):

@@ -78,6 +78,7 @@ awk -F: '$1 == "kioskadmin" { locked = ($2 ~ /^[!*]/) } END { exit !locked }' \
     "$rootfs/etc/shadow" || fail 'The administrator account is not locked.'
 [[ -x "$rootfs/usr/bin/chromium" && -x "$rootfs/usr/bin/cage" ]] \
     || fail 'The browser or compositor is missing.'
+[[ -x "$rootfs/usr/bin/wlrctl" ]] || fail 'The Wayland pointer tool is missing.'
 [[ -x "$rootfs/usr/local/bin/web-kiosk-session" ]] || fail 'The kiosk session is missing.'
 grep -q -- '--autologin kiosk' \
     "$rootfs/etc/systemd/system/getty@tty1.service.d/zz-web-kiosk.conf" \
