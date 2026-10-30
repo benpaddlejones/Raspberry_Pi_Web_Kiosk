@@ -14,36 +14,6 @@ stable Raspberry Pi OS release. Cage provides a dedicated Wayland kiosk session;
 Chromium is the Chrome-compatible browser packaged for Raspberry Pi. There is no
 desktop panel or application launcher.
 
-**Status:** initial pre-release implementation. Source, packaging and workflow
-checks are available, but a flashable image must be built by the release pipeline
-and tested on physical Raspberry Pi hardware before deployment.
-
-## Build a Release
-
-The [Build and Release workflow](.github/workflows/build-release.yml) is adapted
-from the Raspberry HDMI Tester repository. It retains the manual release process,
-JSON version configuration, pi-gen image build, compressed image, checksums, build
-logs and GitHub Release publishing. HDMI applications, test media and the old
-QEMU boot-test kernel are not included.
-
-1. Commit and push this project's files to GitHub.
-2. Open **Actions > Build and Release > Run workflow**.
-3. Leave the version blank to use
-	 [.github/release-config.json](.github/release-config.json), or enter a new
-	 version such as `0.1.0-alpha.2` without a leading `v`.
-4. Download the resulting `.img.gz` and `.sha256` from the GitHub Release.
-
-The workflow uses a native `ubuntu-24.04-arm` runner. It installs current Trixie
-packages from the official repositories and pins the pi-gen builder to the commit
-in the release configuration. It validates the image's FAT boot partition,
-configuration, installed browser, account permissions and startup files before
-publishing. Logs are retained as Actions artifacts even when a build fails.
-An existing release version is not overwritten.
-
-Initial releases are marked as pre-releases because physical boot testing is
-still required. Using a stable OS does not make an untested kiosk image a stable
-product release. Set `prerelease` to `false` only after hardware validation.
-
 ## Flash and Start
 
 Target hardware: Raspberry Pi 3B+ and newer (3B+, 4, 400, 5 and 500), an HDMI
@@ -481,53 +451,6 @@ sudo systemctl restart getty@tty1.service
 
 This terminates the current kiosk session. The command must be run from a
 different console or SSH, not from the kiosk account.
-
-## Development and Hardware Validation
-
-Python uses only the standard library. Run source and packaging tests with:
-
-```bash
-bash scripts/check.sh
-```
-
-The check script also runs ShellCheck and actionlint when installed; the release
-workflow installs both. Tests cover Windows text files, URL validation, safe
-browser arguments, startup retries, Wi-Fi settings parsing and secret removal,
-release metadata and checksum verification.
-
-For a local image build, use a dedicated native ARM64 Debian/Ubuntu host with
-root privileges, loop-device support and at least 20 GiB free. Install the build
-dependencies listed in the workflow, then run:
-
-```bash
-sudo bash scripts/build-image.sh --check
-sudo bash scripts/build-image.sh
-```
-
-Output is placed in `deploy/`. Each build uses a fresh directory under
-`build/work/`; no existing build directory is deleted. Move any previous `.img`
-out of `deploy/` before rebuilding. Ordinary x86-64 Codespaces can run source
-checks but are not the supported image-build host. Update the pinned pi-gen
-revision deliberately when adopting upstream build changes.
-
-Before promoting a release, test on a physical target Pi:
-
-- unattended first boot without Imager customisation, and Sydney time;
-- cold boot, automatic login and full-screen HDMI output;
-- a URL change made from a Windows/macOS computer;
-- the guided on-screen setup with personal and PEAP Wi-Fi, a wrong password,
-	and a network with a web login page;
-- changing an existing Wi-Fi connection with wrong credentials and confirming
-	that the previous profile, certificates and connection are recovered;
-- cancelling and confirming Wi-Fi reset, preserving Ethernet/VPN profiles, and
-	quarantining a rejected Wi-Fi profile without exposing its credentials;
-- automatic sign-in to the login page, including a wrong password and an expired
-	firewall login;
-- WPA2 Personal and Enterprise (PEAP) Wi-Fi from `kiosk-wifi.txt`;
-- delayed networking, browser restart, and an OS upgrade followed by reboot.
-
-Image filesystem validation does not emulate the GPU or prove that a physical Pi
-boots successfully.
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the reused components and
 their licenses.

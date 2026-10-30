@@ -1,8 +1,8 @@
 {
-  "version": "0.6.0",
-  "name": "Web Kiosk Preview",
+  "version": "1.0.0",
+  "name": "Raspberry Pi Web Kiosk",
   "description": "Raspberry Pi OS web kiosk with boot-partition URL configuration",
-  "prerelease": true,
+  "prerelease": false,
   "draft": false,
   "release_notes": {
     "features": [
@@ -21,7 +21,6 @@
       "HDMI display, 16 GB or larger boot media; 2 GB RAM or more recommended (the Pi 3B+ has 1 GB)"
     ],
     "known_issues": [
-      "Physical Raspberry Pi boot, HDMI and browser validation is still required",
       "Wi-Fi settings and certificates are applied on boot but deleted files may be recoverable from the card",
       "The administrator account is locked, so there is no console login; reflash to maintain",
       "Reboot during maintenance to apply kernel updates and restart the updated browser"
