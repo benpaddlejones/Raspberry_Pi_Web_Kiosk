@@ -1,12 +1,15 @@
 import contextlib
 import io
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from kiosk_wifi import (
-    APPLIED_NAME, ERROR_NAME, ConfigError, apply, build_connection, main, read_settings,
+    APPLIED_NAME, CONNECTION_UUID, ERROR_NAME, ConfigError, apply, build_connection, main, read_settings,
+    quarantine_invalid_wifi_profiles, reset_wifi_profiles,
+    wifi_event, write_private,
 )
 
 
@@ -24,6 +27,7 @@ def sections(keyfile: str) -> dict[str, dict[str, str]]:
 
 class WifiTestCase(unittest.TestCase):
     def setUp(self):
+        self.log = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
@@ -176,6 +180,135 @@ class BuildConnectionTests(WifiTestCase):
         self.assertEqual(result["wifi"]["ssid"], "97;59;98;")
 
 
+class ProfileMaintenanceTests(WifiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.connections = self.root / "connections"
+        self.connections.mkdir()
+        self.quarantine = self.root / "quarantine"
+
+    def profile(self, name, content):
+        path = self.connections / f"{name}.nmconnection"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_quarantines_rejected_wifi_but_preserves_other_and_unknown_profiles(self, run):
+        broken = self.profile("broken", "[connection]\nid=School\n[wifi]\nssid=School\n[ wifi-secret ]\npassword=PrivateSecret\n")
+        original = broken.read_bytes()
+        protected = [
+            self.profile("wired", "[connection]\ntype=ethernet\n"),
+            self.profile("vpn", "[connection]\ntype=vpn\n[wifi]\nssid=DoNotTouch\n"),
+            self.profile("unknown", "[connection]\nid=Unclassified\n"),
+            self.profile("unparseable", "not an INI file\n"),
+        ]
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=1), MagicMock(returncode=0),
+        ]
+        with contextlib.redirect_stderr(io.StringIO()) as log:
+            moved = quarantine_invalid_wifi_profiles(self.connections, self.quarantine)
+        self.assertFalse(broken.exists())
+        self.assertEqual(len(moved), 1)
+        self.assertEqual(moved[0].read_bytes(), original)
+        self.assertEqual(moved[0].stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.quarantine.stat().st_mode & 0o777, 0o700)
+        self.assertTrue(all(path.exists() for path in protected))
+        self.assertNotIn("PrivateSecret", log.getvalue())
+        for value in ("School", "broken.nmconnection", "unparseable.nmconnection"):
+            self.assertNotIn(value, log.getvalue())
+        self.assertIn("event=quarantine-profile-moved code=1 reference=", log.getvalue())
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_valid_or_loaded_wifi_profiles_are_not_quarantined(self, run):
+        loaded = self.profile("loaded", f"[connection]\ntype=wifi\nuuid={CONNECTION_UUID.upper()}\n")
+        valid = self.profile("valid", "[connection]\ntype=wifi\n[wifi]\nssid=Home\n")
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=f"{CONNECTION_UUID}:802-11-wireless\n"),
+            MagicMock(returncode=0),
+        ]
+        self.assertEqual(quarantine_invalid_wifi_profiles(self.connections, self.quarantine), [])
+        self.assertTrue(loaded.exists())
+        self.assertTrue(valid.exists())
+        self.assertFalse(self.quarantine.exists())
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_quarantine_does_not_reload_uuid_already_used_by_ethernet(self, run):
+        path = self.profile("duplicate", f"[connection]\ntype=wifi\nuuid={CONNECTION_UUID}\n")
+        run.return_value = MagicMock(returncode=0, stdout=f"{CONNECTION_UUID}:802-3-ethernet\n")
+        self.assertEqual(quarantine_invalid_wifi_profiles(self.connections, self.quarantine), [])
+        self.assertTrue(path.exists())
+        run.assert_called_once()
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_daemon_failure_does_not_quarantine_profiles(self, run):
+        path = self.profile("wifi", "[connection]\ntype=wifi\n")
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=1), MagicMock(returncode=1),
+        ]
+        with self.assertRaises(ConfigError):
+            quarantine_invalid_wifi_profiles(self.connections, self.quarantine)
+        self.assertTrue(path.exists())
+        self.assertFalse(self.quarantine.exists())
+
+    @patch("kiosk_wifi.subprocess.run", return_value=MagicMock(returncode=0, stdout=""))
+    def test_symbolic_links_are_not_examined_or_moved(self, run):
+        external = self.root / "external"
+        external.write_text("[connection]\ntype=wifi\n", encoding="utf-8")
+        link = self.connections / "linked.nmconnection"
+        link.symlink_to(external)
+        self.assertEqual(quarantine_invalid_wifi_profiles(self.connections, self.quarantine), [])
+        self.assertTrue(link.is_symlink())
+        self.assertTrue(external.exists())
+        run.assert_called_once()
+
+    @patch("kiosk_wifi.quarantine_invalid_wifi_profiles")
+    @patch("kiosk_wifi.subprocess.run")
+    def test_reset_deletes_only_wifi_by_uuid(self, run, quarantine):
+        wireless = "a0b7ad05-96e4-4bd3-8ef9-9b96a2594d6e"
+        wired = "51d85b46-bf51-42d7-b22b-210d8f770505"
+        vpn = "10e056c6-45fa-4273-aa13-d60eb8122f17"
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=f"{wireless}:802-11-wireless\n{wired}:802-3-ethernet\n{vpn}:vpn\n"),
+            MagicMock(returncode=0),
+        ]
+        self.assertEqual(reset_wifi_profiles(self.connections, self.quarantine), 1)
+        self.assertEqual(run.call_args.args[0], ["nmcli", "connection", "delete", "uuid", wireless])
+        quarantine.assert_called_once_with(self.connections, self.quarantine)
+        self.assertIn("event=reset-complete count=1", self.log.getvalue())
+        for identifier in (wireless, wired, vpn):
+            self.assertNotIn(identifier, self.log.getvalue())
+
+    @patch("kiosk_wifi.quarantine_invalid_wifi_profiles")
+    @patch("kiosk_wifi.subprocess.run", return_value=MagicMock(returncode=1))
+    def test_failed_enumeration_does_not_delete_anything(self, run, quarantine):
+        with self.assertRaises(ConfigError):
+            reset_wifi_profiles(self.connections, self.quarantine)
+        run.assert_called_once()
+
+    @patch("kiosk_wifi.quarantine_invalid_wifi_profiles")
+    @patch("kiosk_wifi.subprocess.run")
+    def test_reset_stops_when_a_deletion_fails(self, run, quarantine):
+        other = "a0b7ad05-96e4-4bd3-8ef9-9b96a2594d6e"
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=f"{CONNECTION_UUID}:wifi\n{other}:wifi\n"),
+            MagicMock(returncode=1),
+        ]
+        with self.assertRaises(ConfigError):
+            reset_wifi_profiles(self.connections, self.quarantine)
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("event=reset-delete-failed code=1", self.log.getvalue())
+        self.assertIn("event=reset-failed count=0", self.log.getvalue())
+
+    @patch("kiosk_wifi.quarantine_invalid_wifi_profiles")
+    @patch("kiosk_wifi.subprocess.run", return_value=MagicMock(returncode=0, stdout="not-a-uuid:wifi\n"))
+    def test_invalid_uuid_prevents_reset(self, run, quarantine):
+        with self.assertRaises(ConfigError):
+            reset_wifi_profiles(self.connections, self.quarantine)
+        run.assert_called_once()
+
+
 class ApplyTests(WifiTestCase):
     def setUp(self):
         super().setUp()
@@ -188,31 +321,47 @@ class ApplyTests(WifiTestCase):
             encoding="utf-8",
         )
 
-    @patch("kiosk_wifi.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch("kiosk_wifi.subprocess.run", return_value=MagicMock(returncode=0, stdout=""))
     def test_saves_private_connection_and_removes_secrets(self, run):
         apply(self.config, self.connections, self.certs)
         keyfile = self.connections / "kiosk-wifi.nmconnection"
         self.assertEqual(keyfile.stat().st_mode & 0o777, 0o600)
         self.assertEqual((self.certs / "ca-cert.pem").read_text(), "certificate")
         self.assertEqual((self.certs / "ca-cert.pem").stat().st_mode & 0o777, 0o600)
-        run.assert_called_once_with(
-            ["nmcli", "connection", "load", str(keyfile)], capture_output=True, text=True, check=False
-        )
+        self.assertIn(call(
+            ["nmcli", "connection", "load", str(keyfile)], stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, check=False, timeout=15,
+        ), run.call_args_list)
+        self.assertEqual(run.call_args.args[0], [
+            "nmcli", "--wait", "60", "connection", "up", "uuid", CONNECTION_UUID,
+        ])
         self.assertFalse(self.config.exists())
         self.assertFalse((self.boot / "ca.pem").exists())
         applied = (self.boot / APPLIED_NAME).read_text(encoding="utf-8")
         self.assertNotIn("TopSecret", applied)
         self.assertIn("ssid = Corp", applied)
+        self.assertIn("event=save-activation-start", self.log.getvalue())
+        self.assertIn("event=save-committed", self.log.getvalue())
+        for secret in ("Corp", "TopSecret", CONNECTION_UUID, str(self.certs)):
+            self.assertNotIn(secret, self.log.getvalue())
 
-    @patch("kiosk_wifi.subprocess.run", return_value=MagicMock(returncode=4, stderr="Error: invalid"))
+    @patch("kiosk_wifi.subprocess.run")
     def test_rejected_connection_is_removed_and_reported(self, run):
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=4, stderr="Error: invalid PRIVATE RAW ERROR password = SECRET VALUE"),
+            MagicMock(returncode=10),
+        ]
         with patch("kiosk_wifi.os.geteuid", return_value=0), \
                 patch("kiosk_wifi.apply", side_effect=lambda config: apply(config, self.connections, self.certs)), \
                 contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(main(["--config", str(self.config)]), 1)
         self.assertFalse((self.connections / "kiosk-wifi.nmconnection").exists())
         self.assertTrue(self.config.exists())
-        self.assertIn("invalid", (self.boot / ERROR_NAME).read_text(encoding="utf-8"))
+        report = (self.boot / ERROR_NAME).read_text(encoding="utf-8")
+        self.assertIn("exit code 4", report)
+        self.assertNotIn("PRIVATE", report)
+        self.assertNotIn("SECRET", report)
 
     @patch("kiosk_wifi.subprocess.run")
     def test_check_does_not_apply(self, run):
@@ -220,6 +369,152 @@ class ApplyTests(WifiTestCase):
             self.assertEqual(main(["--config", str(self.config), "--check"]), 0)
         run.assert_not_called()
         self.assertTrue(self.config.exists())
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_rejected_replacement_restores_profile_and_certificate(self, run):
+        keyfile = self.connections / "kiosk-wifi.nmconnection"
+        keyfile.write_bytes(b"previous profile")
+        self.certs.mkdir()
+        certificate = self.certs / "ca-cert.pem"
+        certificate.write_bytes(b"previous certificate")
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=4, stderr="invalid replacement"),
+            MagicMock(returncode=0),
+        ]
+        with self.assertRaises(ConfigError):
+            apply(self.config, self.connections, self.certs)
+        self.assertEqual(keyfile.read_bytes(), b"previous profile")
+        self.assertEqual(certificate.read_bytes(), b"previous certificate")
+        self.assertEqual(keyfile.stat().st_mode & 0o777, 0o600)
+        self.assertTrue(self.config.exists())
+        self.assertTrue((self.boot / "ca.pem").exists())
+        self.assertFalse((self.boot / APPLIED_NAME).exists())
+        self.assertEqual(list(self.connections.glob(".kiosk-wifi-backup-*")), [])
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_failed_activation_restores_and_reconnects_previous_wifi(self, run):
+        keyfile = self.connections / "kiosk-wifi.nmconnection"
+        keyfile.write_bytes(b"previous profile")
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=f"{CONNECTION_UUID}:802-11-wireless\n"),
+            MagicMock(returncode=0),
+            MagicMock(returncode=4, stderr="Secrets were required"),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+        ]
+        with self.assertRaises(ConfigError):
+            apply(self.config, self.connections, self.certs)
+        self.assertEqual(keyfile.read_bytes(), b"previous profile")
+        self.assertFalse((self.certs / "ca-cert.pem").exists())
+        self.assertTrue(self.config.exists())
+        self.assertEqual(run.call_args.args[0], [
+            "nmcli", "--wait", "60", "connection", "up", "uuid", CONNECTION_UUID,
+        ])
+        for event in ("save-activation-failed code=4", "rollback-start", "rollback-files-restored",
+                      "rollback-reconnect-result code=0", "rollback-complete"):
+            self.assertIn(f"event={event}", self.log.getvalue())
+
+    def test_event_fields_reject_unstructured_output(self):
+        for fields in ({"count": "PRIVATE SECRET"}, {"code": "password=SECRET"},
+                       {"reference": "/private/profile-name"}):
+            with self.subTest(fields=fields), self.assertRaises(ValueError):
+                wifi_event("test", **fields)
+        self.assertEqual(self.log.getvalue(), "")
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_activation_error_does_not_expose_raw_command_output(self, run):
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=""), MagicMock(returncode=0),
+            MagicMock(returncode=4, stderr="Secrets were required: PRIVATE USER password = PRIVATE PASSWORD"),
+            MagicMock(returncode=0),
+        ]
+        with self.assertRaises(ConfigError) as caught:
+            apply(self.config, self.connections, self.certs)
+        self.assertIn("username or password", str(caught.exception))
+        self.assertNotIn("PRIVATE", str(caught.exception))
+        self.assertNotIn("PRIVATE", self.log.getvalue())
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_failed_rollback_write_logs_only_errno_and_retains_backup(self, run):
+        keyfile = self.connections / "kiosk-wifi.nmconnection"
+        keyfile.write_bytes(b"previous profile")
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=""), MagicMock(returncode=0),
+            MagicMock(returncode=4, stderr="PRIVATE activation failure"),
+        ]
+
+        def write(path, data):
+            if path == keyfile and data == b"previous profile":
+                raise OSError(5, "PRIVATE exception text", "/PRIVATE/FILENAME")
+            write_private(path, data)
+
+        with patch("kiosk_wifi.write_private", side_effect=write), self.assertRaises(OSError):
+            apply(self.config, self.connections, self.certs)
+        self.assertIn("event=rollback-files-failed code=5", self.log.getvalue())
+        self.assertIn("event=backup-retained reference=", self.log.getvalue())
+        self.assertNotIn("PRIVATE", self.log.getvalue())
+        self.assertNotIn(str(self.connections), self.log.getvalue())
+        backup = next(self.connections.glob(".kiosk-wifi-backup-*"))
+        self.assertEqual((backup / "0").read_bytes(), b"previous profile")
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_failed_reconnection_retains_private_recovery_backup(self, run):
+        keyfile = self.connections / "kiosk-wifi.nmconnection"
+        keyfile.write_bytes(b"previous profile")
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=f"{CONNECTION_UUID}:802-11-wireless\n"),
+            MagicMock(returncode=0), MagicMock(returncode=4, stderr="unavailable"),
+            MagicMock(returncode=0), MagicMock(returncode=4),
+        ]
+        with self.assertRaises(ConfigError), contextlib.redirect_stderr(io.StringIO()):
+            apply(self.config, self.connections, self.certs)
+        backup = next(self.connections.glob(".kiosk-wifi-backup-*"))
+        self.assertEqual(backup.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((backup / "0").read_bytes(), b"previous profile")
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_failed_first_managed_connection_reactivates_other_previous_wifi(self, run):
+        previous = "a0b7ad05-96e4-4bd3-8ef9-9b96a2594d6e"
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=f"{previous}:802-11-wireless\n"),
+            MagicMock(returncode=0), MagicMock(returncode=4, stderr="wrong password"),
+            MagicMock(returncode=0), MagicMock(returncode=0),
+        ]
+        with self.assertRaises(ConfigError):
+            apply(self.config, self.connections, self.certs)
+        self.assertFalse((self.connections / "kiosk-wifi.nmconnection").exists())
+        self.assertFalse((self.certs / "ca-cert.pem").exists())
+        self.assertEqual(run.call_args_list[-2].args[0], [
+            "nmcli", "connection", "delete", "uuid", CONNECTION_UUID,
+        ])
+        self.assertEqual(run.call_args.args[0], [
+            "nmcli", "--wait", "60", "connection", "up", "uuid", previous,
+        ])
+
+    @patch("kiosk_wifi.subprocess.run")
+    def test_activation_timeout_rolls_back(self, run):
+        keyfile = self.connections / "kiosk-wifi.nmconnection"
+        keyfile.write_bytes(b"previous profile")
+        run.side_effect = [
+            MagicMock(returncode=0, stdout=""), MagicMock(returncode=0),
+            subprocess.TimeoutExpired("nmcli", 70), MagicMock(returncode=0),
+        ]
+        with self.assertRaises(ConfigError):
+            apply(self.config, self.connections, self.certs)
+        self.assertEqual(keyfile.read_bytes(), b"previous profile")
+        self.assertFalse((self.certs / "ca-cert.pem").exists())
+        self.assertTrue(self.config.exists())
+
+    @patch("kiosk_wifi.subprocess.run", return_value=MagicMock(returncode=1))
+    def test_no_settings_are_written_when_networkmanager_is_unavailable(self, run):
+        keyfile = self.connections / "kiosk-wifi.nmconnection"
+        keyfile.write_bytes(b"previous profile")
+        with self.assertRaises(ConfigError):
+            apply(self.config, self.connections, self.certs)
+        self.assertEqual(keyfile.read_bytes(), b"previous profile")
+        self.assertFalse(self.certs.exists())
+        run.assert_called_once()
 
 
 if __name__ == "__main__":

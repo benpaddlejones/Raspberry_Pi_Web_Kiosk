@@ -4,6 +4,7 @@ set -uo pipefail
 state_dir=/var/lib/raspberry-pi-web-kiosk
 done_marker="$state_dir/network-setup-done"
 trigger=/boot/firmware/kiosk-network-setup.txt
+exec 3>/dev/tty
 
 mark_done() {
     install -d -m 0755 "$state_dir"
@@ -13,36 +14,49 @@ mark_done() {
 forced=false
 if [[ -e "$trigger" ]]; then
     forced=true
+    printf '%s\n' 'Wi-Fi event=setup-trigger-detected' >&2
     rm -f -- "$trigger"
 fi
 if ! "$forced"; then
-    [[ -e "$done_marker" ]] && exit 0
+    if [[ -e "$done_marker" ]]; then
+        printf '%s\n' 'Wi-Fi event=setup-skipped-already-configured' >&2
+        exit 0
+    fi
     if nm-online --quiet --timeout=30; then
         mark_done
+        printf '%s\n' 'Wi-Fi event=setup-skipped-network-online' >&2
         exit 0
     fi
 fi
 
 while true; do
-    clear
+    clear >&3
     printf '%s\n' \
         'Raspberry Pi Web Kiosk - network setup' \
         '' \
         'To set up or change Wi-Fi, connect a keyboard and press Enter.' \
         'Or plug in an Ethernet cable and wait.' \
         '' \
-        'The kiosk starts in 60 seconds if no key is pressed.'
+        'The kiosk starts in 60 seconds if no key is pressed.' >&3
     if ! read -r -t 60; then
+        printf '%s\n' 'Wi-Fi event=setup-prompt-timeout' >&2
         exit 0
     fi
+    printf '%s\n' 'Wi-Fi event=setup-prompt-accepted' >&2
     python3 /usr/local/lib/raspberry-pi-web-kiosk/kiosk_wifi_setup.py
-    clear
-    printf '%s\n' 'Checking the connection...'
+    printf 'Wi-Fi event=setup-tool-exited code=%d\n' "$?" >&2
+    clear >&3
+    printf '%s\n' 'Checking the connection...' >&3
     if nm-online --quiet --timeout=30; then
         mark_done
-        printf '%s\n' 'Connected. Starting the kiosk.'
+        printf '%s\n' 'Wi-Fi event=setup-network-online' >&2
+        printf '%s\n' 'Connected. Starting the kiosk.' >&3
         exit 0
     fi
-    printf '%s\n' 'Still not connected. Press Enter to try again.'
-    read -r -t 60 || exit 0
+    printf '%s\n' 'Wi-Fi event=setup-network-offline' >&2
+    printf '%s\n' 'Still not connected. Press Enter to try again.' >&3
+    if ! read -r -t 60; then
+        printf '%s\n' 'Wi-Fi event=setup-retry-timeout' >&2
+        exit 0
+    fi
 done

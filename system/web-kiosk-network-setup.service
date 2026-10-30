@@ -9,7 +9,7 @@ Type=oneshot
 ExecStart=/usr/local/bin/web-kiosk-network-setup
 Environment=TERM=linux
 StandardInput=tty
-StandardOutput=tty
+StandardOutput=journal
 StandardError=journal
 TTYPath=/dev/tty1
 TTYReset=yes

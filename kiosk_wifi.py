@@ -2,9 +2,11 @@
 """Apply Wi-Fi settings from kiosk-wifi.txt on the readable boot partition."""
 
 import argparse
+import configparser
 import contextlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,7 @@ from typing import NamedTuple
 DEFAULT_CONFIG = Path("/boot/firmware/kiosk-wifi.txt")
 CONNECTION_DIR = Path("/etc/NetworkManager/system-connections")
 CERT_DIR = Path("/etc/raspberry-pi-web-kiosk/wifi")
+QUARANTINE_DIR = Path("/var/lib/raspberry-pi-web-kiosk/wifi-quarantine")
 CONNECTION_ID = "kiosk-wifi"
 CONNECTION_UUID = str(uuid.uuid5(uuid.NAMESPACE_URL, "urn:raspberry-pi-web-kiosk:kiosk-wifi"))
 APPLIED_NAME = "kiosk-wifi-applied.txt"
@@ -106,7 +109,7 @@ def read_settings(path: Path = DEFAULT_CONFIG) -> dict[str, str]:
     except UnicodeError as error:
         raise ConfigError(f"{path.name} must be saved as UTF-8 plain text.") from error
     except OSError as error:
-        raise ConfigError(f"Cannot read {path.name}: {error}") from error
+        raise ConfigError(f"Cannot read Wi-Fi settings (errno {error.errno}).") from error
 
     settings: dict[str, str] = {}
     seen: set[str] = set()
@@ -306,21 +309,213 @@ def _archive(config: Path) -> None:
     config.unlink()
 
 
+def wifi_event(event: str, *, count: int | None = None, code: int | None = None,
+               reference: str = "") -> None:
+    """Log fixed event names and numeric diagnostics, never configuration or command output."""
+    if not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", event):
+        raise ValueError("Invalid Wi-Fi event name.")
+    fields = [f"Wi-Fi event={event}"]
+    for key, value in (("count", count), ("code", code)):
+        if value is not None:
+            if type(value) is not int:
+                raise ValueError("Wi-Fi diagnostics must be integers.")
+            fields.append(f"{key}={value}")
+    if reference:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,32}", reference):
+            raise ValueError("Invalid Wi-Fi recovery reference.")
+        fields.append(f"reference={reference}")
+    print(" ".join(fields), file=sys.stderr, flush=True)
+
+
+def _nmcli(arguments: list[str], timeout: float = 15) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            ["nmcli", *arguments], stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, check=False, timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        wifi_event("nmcli-timeout" if isinstance(error, subprocess.TimeoutExpired) else "nmcli-command-error",
+                   code=error.errno if isinstance(error, OSError) else None)
+        raise ConfigError(f"NetworkManager command failed ({type(error).__name__}).") from error
+
+
+def _connection_profiles(active: bool = False) -> dict[str, str]:
+    arguments = ["--terse", "--escape", "no", "--fields", "UUID,TYPE", "connection", "show"]
+    if active:
+        arguments.append("--active")
+    result = _nmcli(arguments)
+    if result.returncode != 0:
+        wifi_event("profile-list-failed", code=result.returncode)
+        raise ConfigError("Cannot list saved NetworkManager connections.")
+    connections = {}
+    for line in result.stdout.splitlines():
+        identifier, separator, kind = line.partition(":")
+        if separator:
+            try:
+                connections[str(uuid.UUID(identifier))] = kind
+            except ValueError:
+                wifi_event("profile-list-invalid-uuid")
+                raise ConfigError("NetworkManager returned an invalid connection UUID.") from None
+    return connections
+
+
+def wifi_connection_uuids(active: bool = False) -> list[str]:
+    return [
+        identifier for identifier, kind in _connection_profiles(active).items()
+        if kind in ("wifi", "802-11-wireless")
+    ]
+
+
+def quarantine_invalid_wifi_profiles(connection_dir: Path = CONNECTION_DIR,
+                                     quarantine_dir: Path = QUARANTINE_DIR) -> list[Path]:
+    wifi_event("quarantine-scan-start")
+    loaded = set(_connection_profiles())
+    quarantined = []
+    for path in sorted(connection_dir.glob("*.nmconnection")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        profile = configparser.ConfigParser(interpolation=None, strict=False)
+        try:
+            data = path.read_bytes()
+            profile.read_string(data.decode("utf-8-sig"))
+        except (OSError, UnicodeError, configparser.Error):
+            wifi_event("quarantine-unclassified-file-preserved")
+            continue
+        kind = profile.get("connection", "type", fallback="")
+        wireless = kind in ("wifi", "802-11-wireless") or (
+            not kind and any(profile.has_section(section) for section in ("wifi", "802-11-wireless"))
+        )
+        identifier = profile.get("connection", "uuid", fallback="")
+        with contextlib.suppress(ValueError):
+            identifier = str(uuid.UUID(identifier))
+        if not wireless or identifier in loaded:
+            continue
+        result = _nmcli(["connection", "load", str(path)])
+        if result.returncode == 0:
+            continue
+        if _nmcli(["general", "status"]).returncode != 0:
+            wifi_event("quarantine-daemon-unavailable")
+            raise ConfigError("NetworkManager is unavailable; no further profiles will be quarantined.")
+        if quarantine_dir.is_symlink():
+            raise ConfigError("The Wi-Fi quarantine directory must not be a symbolic link.")
+        quarantine_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        quarantine_dir.chmod(0o700)
+        reference = uuid.uuid4().hex
+        destination = quarantine_dir / f"{reference}-{path.name}"
+        write_private(destination, data)
+        path.unlink()
+        quarantined.append(destination)
+        wifi_event("quarantine-profile-moved", code=result.returncode, reference=reference)
+    wifi_event("quarantine-complete", count=len(quarantined))
+    return quarantined
+
+
+def reset_wifi_profiles(connection_dir: Path = CONNECTION_DIR,
+                        quarantine_dir: Path = QUARANTINE_DIR) -> int:
+    wifi_event("reset-start")
+    removed = 0
+    try:
+        quarantine_invalid_wifi_profiles(connection_dir, quarantine_dir)
+        identifiers = wifi_connection_uuids()
+        wifi_event("reset-planned", count=len(identifiers))
+        for identifier in identifiers:
+            result = _nmcli(["connection", "delete", "uuid", identifier])
+            if result.returncode != 0:
+                wifi_event("reset-delete-failed", code=result.returncode)
+                raise ConfigError("Wi-Fi reset stopped after a deletion failed; some profiles may already be removed.")
+            removed += 1
+            wifi_event("reset-profile-removed", count=removed)
+    except (ConfigError, OSError):
+        wifi_event("reset-failed", count=removed)
+        raise
+    wifi_event("reset-complete", count=removed)
+    return removed
+
+
 def save_connection(connection: Connection, connection_dir: Path = CONNECTION_DIR,
                     cert_dir: Path = CERT_DIR) -> None:
+    wifi_event("save-start")
+    previous_active = wifi_connection_uuids(active=True)
+    wifi_event("save-previous-active", count=len(previous_active))
     cert_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    for source, destination in connection.files:
-        write_private(destination, source.read_bytes())
     keyfile = connection_dir / f"{CONNECTION_ID}.nmconnection"
-    write_private(keyfile, connection.keyfile.encode())
-
-    result = subprocess.run(
-        ["nmcli", "connection", "load", str(keyfile)],
-        capture_output=True, text=True, check=False,
-    )
-    if result.returncode != 0:
-        keyfile.unlink(missing_ok=True)
-        raise ConfigError(f"NetworkManager rejected the settings: {result.stderr.strip()}")
+    destinations = [keyfile, *(destination for _, destination in connection.files)]
+    backup_dir = Path(tempfile.mkdtemp(prefix=".kiosk-wifi-backup-", dir=connection_dir))
+    backups = {}
+    discard_backup = False
+    try:
+        for index, destination in enumerate(dict.fromkeys(destinations)):
+            if destination.is_symlink():
+                raise ConfigError("Cannot replace a symbolic link in the Wi-Fi settings.")
+            backup = backup_dir / str(index)
+            if destination.exists():
+                write_private(backup, destination.read_bytes())
+                backups[destination] = backup
+            else:
+                backups[destination] = None
+        wifi_event("save-backup-ready", count=len(backups))
+        try:
+            for source, destination in connection.files:
+                write_private(destination, source.read_bytes())
+            write_private(keyfile, connection.keyfile.encode())
+            wifi_event("save-load-start")
+            result = _nmcli(["connection", "load", str(keyfile)])
+            if result.returncode != 0:
+                wifi_event("save-load-failed", code=result.returncode)
+                raise ConfigError(f"NetworkManager rejected the Wi-Fi settings (nmcli exit code {result.returncode}).")
+            wifi_event("save-activation-start")
+            result = _nmcli(["--wait", "60", "connection", "up", "uuid", CONNECTION_UUID], timeout=70)
+            if result.returncode != 0:
+                wifi_event("save-activation-failed", code=result.returncode)
+                detail = result.stderr.lower()
+                if any(word in detail for word in ("secrets", "password", "authentication")):
+                    wifi_event("save-authentication-required-or-rejected", code=result.returncode)
+                    reason = "Authentication failed; check the Wi-Fi username or password."
+                elif "could not be found" in detail or "no network with ssid" in detail:
+                    wifi_event("save-network-not-found", code=result.returncode)
+                    reason = "The Wi-Fi network could not be found."
+                else:
+                    reason = "Could not activate the new Wi-Fi connection."
+                raise ConfigError(f"{reason} (nmcli exit code {result.returncode}).")
+            discard_backup = True
+            wifi_event("save-committed")
+        except BaseException as error:
+            wifi_event("save-aborted", code=error.errno if isinstance(error, OSError) else None)
+            wifi_event("rollback-start")
+            try:
+                for destination, backup in backups.items():
+                    if backup is None:
+                        destination.unlink(missing_ok=True)
+                    else:
+                        write_private(destination, backup.read_bytes())
+            except OSError as error:
+                wifi_event("rollback-files-failed", code=error.errno)
+                raise
+            wifi_event("rollback-files-restored", count=len(backups))
+            try:
+                if backups[keyfile] is not None:
+                    result = _nmcli(["connection", "load", str(keyfile)])
+                    restored = result.returncode == 0
+                    wifi_event("rollback-reload-result", code=result.returncode)
+                else:
+                    result = _nmcli(["connection", "delete", "uuid", CONNECTION_UUID])
+                    restored = result.returncode in (0, 10)
+                    wifi_event("rollback-candidate-removal-result", code=result.returncode)
+                wifi_event("rollback-reconnect-start", count=len(previous_active))
+                for identifier in previous_active:
+                    result = _nmcli(["--wait", "60", "connection", "up", "uuid", identifier], timeout=70)
+                    wifi_event("rollback-reconnect-result", code=result.returncode)
+                    restored = result.returncode == 0 and restored
+                discard_backup = restored
+            except ConfigError:
+                pass
+            wifi_event("rollback-complete" if discard_backup else "rollback-incomplete")
+            raise
+    finally:
+        if discard_backup:
+            shutil.rmtree(backup_dir)
+        else:
+            wifi_event("backup-retained", reference=backup_dir.name.removeprefix(".kiosk-wifi-backup-"))
 
 
 def apply(config: Path = DEFAULT_CONFIG, connection_dir: Path = CONNECTION_DIR,
@@ -359,13 +554,19 @@ def main(arguments: list[str] | None = None) -> int:
             if os.geteuid() != 0:
                 raise ConfigError("Apply Wi-Fi settings as root.")
             connection = apply(options.config)
-            print(f"Wi-Fi settings for '{values['ssid']}' saved.")
+            wifi_event("provisioning-complete")
         for warning in connection.warnings:
             print(f"Warning: {warning}", file=sys.stderr)
     except (ConfigError, OSError) as error:
-        print(f"Wi-Fi setup failed: {error}", file=sys.stderr)
+        wifi_event("provisioning-failed", code=error.errno if isinstance(error, OSError) else None)
+        detail = (
+            f"Wi-Fi file operation failed ({type(error).__name__}, errno {error.errno})."
+            if isinstance(error, OSError) else str(error)
+        )
         if not options.check:
-            _report_error(options.config, str(error))
+            _report_error(options.config, detail)
+        else:
+            print(detail, file=sys.stderr)
         return 1
     return 0
 

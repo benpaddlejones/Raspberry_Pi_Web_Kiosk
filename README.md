@@ -164,6 +164,9 @@ on-screen setup is skipped.
 If the Pi has no network connection at first boot, it shows a network setup
 screen before the kiosk starts. Connect a USB keyboard and press Enter. Use the
 arrow keys to move, Enter to choose, and Tab to reach the buttons.
+Only prompts and interactive dialogs draw on the setup terminal. Background
+command output goes to the system journal instead of over the menus; relevant
+diagnostics are included in the redacted `kiosk-log.txt` export on `bootfs`.
 
 1. Choose **Connect to Wi-Fi**. The Pi lists nearby networks with their signal
 	and how they sign in (*password* or *username + password*). Choose yours, or
@@ -181,6 +184,8 @@ arrow keys to move, Enter to choose, and Tab to reach the buttons.
 **Advanced network settings** opens NetworkManager's full text tool, `nmtui`,
 for anything else (TTLS, TLS, static IP addresses). In `nmtui`, enterprise
 networks must be added with **Edit a connection > Add > Wi-Fi**.
+Changes made directly in this advanced tool are managed by NetworkManager;
+the kiosk's rollback described below covers guided setup and `kiosk-wifi.txt`.
 
 Settings are saved permanently in the Pi's protected system storage; nothing is
 written to the readable boot partition. Once online, the screen is skipped on
@@ -219,11 +224,15 @@ matches the dialog's "No CA certificate is required" option, but it lets a fake
 access point capture the password. Prefer a CA certificate and `domain`. WEP,
 LEAP and dynamic WEP are insecure and provided only for legacy networks.
 
-On the next boot, a root service validates the file and saves a NetworkManager
-connection that only root can read. It then renames the file to
-`kiosk-wifi-applied.txt` with the passwords removed and deletes the certificate
-and key files from `bootfs`. If the settings are invalid, nothing is changed and
-the reason is written to `kiosk-wifi-error.txt`. To change Wi-Fi, create a new
+On the next boot, a root service validates the file and attempts to activate a
+NetworkManager connection that only root can read. Only after Wi-Fi connects
+does it rename the file to
+`kiosk-wifi-applied.txt` with the passwords removed and delete the certificate
+and key files from `bootfs`. Invalid settings do not replace the saved connection.
+If saving or connecting fails, the previous profile and overwritten certificates
+are restored and the Pi tries to reconnect the previous Wi-Fi connection. The
+input file and certificate/key files remain on `bootfs` for correction, and the
+reason is written to `kiosk-wifi-error.txt`. To change Wi-Fi, create a new
 `kiosk-wifi.txt` (for example, from `kiosk-wifi-applied.txt`) and re-enter the
 passwords.
 
@@ -236,9 +245,39 @@ password. The on-screen setup avoids this.
 Shut down the Pi and move the boot drive to another computer, then either:
 
 - create an empty `kiosk-network-setup.txt` on `bootfs` to show the on-screen
-	setup on the next boot, even when a network is available; or
-- create a new `kiosk-wifi.txt`. It replaces the connection previously saved from
-	this file. A connection added on screen is kept alongside it.
+	setup on the next boot, even when a network is available. The trigger does not
+	reset or delete saved connections; or
+- create a new `kiosk-wifi.txt`. The file and guided setup update the same managed
+	`kiosk-wifi` profile. Other valid saved profiles remain alongside it.
+
+Guided setup and file-based changes keep a private backup of the existing managed
+profile and any certificates being overwritten until the replacement connects.
+A wrong password, unavailable network or failed save restores those files and
+attempts to reconnect the previous Wi-Fi connection. A network that requires a
+web login still counts as a successful Wi-Fi connection. Cancelling guided
+credential entry leaves existing profiles unchanged. If rollback cannot finish,
+the recovery backup is retained under
+`/etc/NetworkManager/system-connections/.kiosk-wifi-backup-*`; its location is
+identified by the opaque `reference` in the `backup-retained` event in
+`kiosk-log.txt`. Match it to the directory suffix; no profile name or credentials
+are logged. Backups are protected from non-root access.
+
+To deliberately forget saved networks, choose **Reset saved Wi-Fi connections**
+in the setup menu and confirm **Reset Wi-Fi**. Confirmation defaults to Cancel.
+This disconnects Wi-Fi and deletes recognized saved Wi-Fi profiles by UUID;
+Ethernet and VPN profiles are not deleted. A failure stops the reset and reports
+that it could not finish; some Wi-Fi profiles may already have been removed.
+Then choose **Connect to Wi-Fi** to configure a network again. The reset does
+not remove certificates, quarantine copies or boot-partition settings files.
+
+When setup is opened, and after leaving Advanced settings, unloaded files clearly
+identified as Wi-Fi profiles are checked with NetworkManager. Rejected profiles
+are copied into `/var/lib/raspberry-pi-web-kiosk/wifi-quarantine` and removed from
+the active profile directory, rather than discarded. Each copy has a unique
+name and root-only permissions; it can contain credentials. Actions are logged
+with an opaque `reference` matching the quarantine filename prefix, without the
+original filename or profile contents. Already loaded profiles, non-Wi-Fi profiles,
+symbolic links and files whose type cannot be safely identified are left alone.
 
 ### Network Login Page
 
@@ -386,11 +425,24 @@ The released image has no administrator login. On the image:
 	`kiosk-log.txt` on `bootfs`. It is rewritten from scratch about every 90 seconds
 	and at each boot, so it never grows and only describes the current boot (the
 	previous boot's log is lost about 45 seconds into the next). It holds at most
-	300 lines of the kiosk session, login, network/time setup messages and recent
-	warnings, plus the power status (`throttled=0x0` is healthy; anything else
-	means under-voltage or overheating). Passwords and tokens are never logged, and
-	MAC addresses and URL query strings are masked, but it can contain network
-	names and host names. The Pi has no battery-backed clock, so until it can reach
+	300 journal lines: up to 80 Wi-Fi lifecycle events, 120 other session/service
+	messages and 100 warnings, plus headers and power status (`throttled=0x0` is
+	healthy; anything else means under-voltage or overheating). Lifecycle events
+	cover the setup trigger, opening/closing/cancellation, save/activation, rollback
+	and reconnection, reset confirmation/results, and quarantine actions. They use
+	fixed event names, counts, exit codes and opaque recovery references, not SSIDs,
+	usernames, profile contents or raw NetworkManager errors. Look for
+	`rollback-complete` versus `rollback-incomplete`, `backup-retained`, and
+	`reset-complete` versus `reset-failed` when debugging reconfiguration.
+
+	The exporter masks recognized secret assignments (including spaced or quoted
+	values), authorization/cookie fields, MAC addresses, NetworkManager profile
+	paths, and URL credentials, paths, queries and fragments. Redaction is a
+	defense in depth, not a guarantee about arbitrary third-party journal text:
+	system messages can still contain network names, IP addresses, hostnames,
+	system usernames and other metadata. Review the file before sharing it outside
+	your organization. It is a bounded current-boot snapshot, not an anonymous or
+	complete audit history. The Pi has no battery-backed clock, so until it can reach
 	a time server (blocked while a network login is pending) its dates and times
 	are stale, often from the day the image was built. The line `clock synchronised
 	with a time server: no` at the top means the times are not real. Share it when
@@ -465,6 +517,10 @@ Before promoting a release, test on a physical target Pi:
 - a URL change made from a Windows/macOS computer;
 - the guided on-screen setup with personal and PEAP Wi-Fi, a wrong password,
 	and a network with a web login page;
+- changing an existing Wi-Fi connection with wrong credentials and confirming
+	that the previous profile, certificates and connection are recovered;
+- cancelling and confirming Wi-Fi reset, preserving Ethernet/VPN profiles, and
+	quarantining a rejected Wi-Fi profile without exposing its credentials;
 - automatic sign-in to the login page, including a wrong password and an expired
 	firewall login;
 - WPA2 Personal and Enterprise (PEAP) Wi-Fi from `kiosk-wifi.txt`;

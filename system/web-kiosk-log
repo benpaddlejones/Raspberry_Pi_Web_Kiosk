@@ -8,10 +8,14 @@ trap 'rm -f "$tmp"' EXIT
 
 # Anyone holding the card can read the boot partition, so cap line length and mask MAC addresses and secrets.
 tidy() {
-    cut -c1-500 | sed -E \
+    sed -E \
         -e 's/([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/xx:xx:xx:xx:xx:xx/g' \
-        -e 's/(password|passwd|psk|secret|token|identity)=[^ ]*/\1=***/Ig' \
-        -e 's#(https?://[^ ?"]+)\?[^ "]*#\1?***#g'
+        -e 's#(https?://)[^/?#[:space:]]+@#\1***@#g' \
+        -e 's/((password|passwd|passphrase|psk|secret|token|identity|username|authorization|cookie|ssid)["\x27]?[[:space:]]*[:=][[:space:]]*).*/\1***/Ig' \
+        -e 's#(https?://[^/ ?#"\x27]+)[/?#][^[:space:]"\x27]*#\1/***#g' \
+        -e 's#"/etc/NetworkManager/system-connections/[^"]*"#"[profile]"#g' \
+        -e 's#\x27/etc/NetworkManager/system-connections/[^\x27]*\x27#\x27[profile]\x27#g' \
+        -e 's#/etc/NetworkManager/system-connections/[^[:space:]]*#[profile]#g' | cut -c1-500
 }
 
 {
@@ -23,15 +27,19 @@ tidy() {
         printf 'power/throttling (0x0 is healthy): '
         vcgencmd get_throttled
     fi
+    printf '\n--- Wi-Fi lifecycle events (this boot)\n'
+    journalctl -b --no-pager -o short-iso -t web-kiosk-wifi -t web-kiosk-network-setup \
+        | grep -F 'Wi-Fi event=' | tail -n 80 | tidy
     printf '\n--- kiosk session, sign-in and network setup (this boot)\n'
     {
         journalctl -b --no-pager -o short-iso \
-            -t web-kiosk -t web-kiosk-portal -t web-kiosk-wifi -t web-kiosk-network-setup -t web-kiosk-time
+            -t web-kiosk -t web-kiosk-portal -t web-kiosk-wifi -t web-kiosk-network-setup -t web-kiosk-time \
+            | grep -F -v 'Wi-Fi event='
         printf '\n--- login and network/time services (this boot)\n'
         journalctl -b --no-pager -o short-iso \
             -u getty@tty1.service -u systemd-logind.service \
             -u NetworkManager-wait-online.service -u systemd-timesyncd.service
-    } | tail -n 200 | tidy
+    } | tail -n 120 | tidy
     printf '\n--- warnings and errors (this boot)\n'
     journalctl -b --no-pager -o short-iso -p warning | tail -n 100 | tidy
 } > "$tmp" 2>&1

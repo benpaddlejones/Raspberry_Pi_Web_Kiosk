@@ -6,7 +6,10 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-from kiosk_wifi import CONNECTION_ID, ConfigError, build_connection, save_connection
+from kiosk_wifi import (
+    Connection, ConfigError, build_connection, quarantine_invalid_wifi_profiles,
+    reset_wifi_profiles, save_connection, wifi_event,
+)
 
 
 BOOT_DIR = Path("/boot/firmware")
@@ -37,11 +40,18 @@ class Network(NamedTuple):
     signal: int
 
 
+def _run_ui(arguments: list[str], capture_answer: bool = False) -> subprocess.CompletedProcess:
+    with open("/dev/tty", "w", encoding="utf-8") as terminal:
+        return subprocess.run(
+            arguments, stdin=sys.stdin, stdout=terminal,
+            stderr=subprocess.PIPE if capture_answer else terminal,
+            text=True, check=False,
+        )
+
+
 def _whiptail(*arguments: str) -> str:
     # whiptail draws on the terminal and writes the answer to stderr.
-    result = subprocess.run(
-        ["whiptail", "--title", TITLE, *arguments], stderr=subprocess.PIPE, text=True, check=False
-    )
+    result = _run_ui(["whiptail", "--title", TITLE, *arguments], capture_answer=True)
     if result.returncode != 0:
         raise Cancelled
     return result.stderr
@@ -178,42 +188,52 @@ def collect_settings(ssid: str, security: str, hidden: bool) -> dict[str, str]:
     return values
 
 
-def activate(ssid: str) -> tuple[bool, str]:
+def activate(ssid: str, connection: Connection) -> tuple[bool, str]:
     _whiptail("--infobox", f"Connecting to '{ssid}'...\nThis can take up to a minute.", "8", "60")
-    result = subprocess.run(
-        ["nmcli", "--wait", "60", "connection", "up", "id", CONNECTION_ID],
-        stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False,
-    )
-    if result.returncode == 0:
+    try:
+        save_connection(connection)
+    except (ConfigError, OSError) as error:
+        wifi_event("setup-activation-failed", code=error.errno if isinstance(error, OSError) else None)
+        detail = str(error)
+        if "secrets" in detail.lower():
+            detail = "The network rejected the username or password. Please try again."
+        elif "could not be found" in detail or "No network with SSID" in detail:
+            detail = f"'{ssid}' could not be found. Check the Pi is within range."
+        return False, f"{detail}\nPrevious Wi-Fi settings were preserved; see the log if reconnection failed."
+    try:
         connectivity = subprocess.run(
             ["nmcli", "networking", "connectivity", "check"],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, check=False, timeout=15,
         ).stdout.strip()
-        if connectivity == "portal":
-            return True, (
-                f"Connected to '{ssid}', but the network requires a web login. "
-                "The Pi signs in automatically if kiosk-portal.txt names the login page; "
-                "otherwise the kiosk shows the login page."
-            )
-        return True, f"Connected to '{ssid}'. Settings are saved permanently."
-
-    error = result.stderr.strip()
-    if "Secrets were required" in error or "secrets" in error.lower():
-        return False, "The network rejected the username or password. Please try again."
-    if "could not be found" in error or "No network with SSID" in error:
-        return False, f"'{ssid}' could not be found. Check the Pi is within range."
-    return False, f"Could not connect to '{ssid}'.\n\n{error}"
+    except (OSError, subprocess.SubprocessError):
+        connectivity = "unknown"
+    wifi_event({
+        "full": "setup-connectivity-full", "portal": "setup-connectivity-portal",
+        "limited": "setup-connectivity-limited", "none": "setup-connectivity-none",
+    }.get(connectivity, "setup-connectivity-unknown"))
+    if connectivity == "portal":
+        return True, (
+            f"Connected to '{ssid}', but the network requires a web login. "
+            "The Pi signs in automatically if kiosk-portal.txt names the login page; "
+            "otherwise the kiosk shows the login page."
+        )
+    return True, f"Connected to '{ssid}'. Settings are saved permanently."
 
 
 def connect_wifi() -> bool:
-    ssid, security, hidden = choose_network()
+    wifi_event("setup-connect-start")
     try:
+        ssid, security, hidden = choose_network()
         connection = build_connection(collect_settings(ssid, security, hidden), BOOT_DIR)
-        save_connection(connection)
+    except Cancelled:
+        wifi_event("setup-connect-cancelled")
+        raise
     except (ConfigError, OSError) as error:
+        wifi_event("setup-validation-failed", code=error.errno if isinstance(error, OSError) else None)
         message(f"These settings could not be saved:\n\n{error}")
         return False
-    connected, result = activate(ssid)
+    connected, result = activate(ssid, connection)
+    wifi_event("setup-connect-complete" if connected else "setup-connect-failed")
     if connection.warnings:
         result += "\n\nNote: " + " ".join(connection.warnings)
     message(result)
@@ -234,7 +254,42 @@ def status() -> str:
     return "\n".join(lines) or "Not connected."
 
 
+def check_saved_wifi() -> None:
+    try:
+        quarantine_invalid_wifi_profiles()
+    except (ConfigError, OSError) as error:
+        wifi_event("profile-check-failed", code=error.errno if isinstance(error, OSError) else None)
+
+
+def reset_saved_wifi() -> bool:
+    wifi_event("reset-requested")
+    try:
+        _whiptail(
+            "--defaultno", "--yes-button", "Reset Wi-Fi", "--no-button", "Cancel",
+            "--yesno",
+            "Remove all saved Wi-Fi connections? This disconnects Wi-Fi.\n\n"
+            "Ethernet and VPN profiles will not be removed.\n"
+            "Quarantined copies, certificates and boot files are retained.",
+            "14", "76",
+        )
+    except Cancelled:
+        wifi_event("reset-cancelled")
+        return False
+    wifi_event("reset-confirmed")
+    try:
+        count = reset_wifi_profiles()
+    except (ConfigError, OSError) as error:
+        wifi_event("reset-dialog-failed", code=error.errno if isinstance(error, OSError) else None)
+        message(f"Wi-Fi reset could not finish:\n\n{error}")
+        return False
+    wifi_event("reset-dialog-complete", count=count)
+    message(f"Removed {count} saved Wi-Fi connections.\nChoose Connect to Wi-Fi to configure a network.")
+    return True
+
+
 def main() -> int:
+    wifi_event("setup-opened")
+    check_saved_wifi()
     while True:
         try:
             choice = menu(
@@ -242,18 +297,31 @@ def main() -> int:
                 [
                     ("wifi", "Connect to Wi-Fi"),
                     ("advanced", "Advanced network settings (all options)"),
+                    ("reset", "Reset saved Wi-Fi connections"),
                     ("done", "Finish and start the kiosk"),
                 ],
             )
         except Cancelled:
+            wifi_event("setup-closed")
             return 0
         if choice == "done":
+            wifi_event("setup-finished")
             return 0
         if choice == "advanced":
-            subprocess.run(["nmtui"], check=False)
+            wifi_event("advanced-opened")
+            try:
+                result = _run_ui(["nmtui"])
+                wifi_event("advanced-closed", code=result.returncode)
+            except OSError as error:
+                wifi_event("advanced-failed", code=error.errno)
+                message("Advanced network settings could not be opened.")
+            check_saved_wifi()
             continue
         try:
-            connect_wifi()
+            if choice == "reset":
+                reset_saved_wifi()
+            else:
+                connect_wifi()
         except Cancelled:
             continue
 
